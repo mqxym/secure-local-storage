@@ -1,25 +1,17 @@
 import { SLS_CONSTANTS } from "../constants";
 import { CryptoError, ValidationError } from "../errors";
-
-// Minimal type declarations for argon2-browser
-// (kept inline to avoid external @types)
-declare module "argon2-browser" {
-  export const ArgonType: { Argon2id: number };
-  export function hash(opts: {
-    pass: string | Uint8Array;
-    salt: Uint8Array;
-    time: number;       // iterations
-    mem: number;        // KiB
-    hashLen: number;    // bytes
-    parallelism: number;
-    type: number;       // ArgonType.Argon2id
-  }): Promise<{ hash: Uint8Array }>;
-}
+// No module augmentation — treat as any-typed JS module
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore
 import * as argon2 from "argon2-browser";
 
-/** Derive a non-extractable KEK (CryptoKey) from password using Argon2id. */
+function toArrayBuffer(u8: Uint8Array): ArrayBuffer {
+  if (u8.byteOffset === 0 && u8.byteLength === u8.buffer.byteLength && u8.buffer instanceof ArrayBuffer) {
+    return u8.buffer as ArrayBuffer;
+  }
+  return u8.slice().buffer as ArrayBuffer;
+}
+
 export async function deriveKekFromPassword(
   password: string,
   salt: Uint8Array,
@@ -47,14 +39,12 @@ export async function deriveKekFromPassword(
     throw new CryptoError(`Argon2 derivation failed: ${(e as Error)?.message ?? e}`);
   }
 
-  if (!result?.hash) {
-    throw new CryptoError("Argon2 returned no hash");
-  }
+  if (!result?.hash) throw new CryptoError("Argon2 returned no hash");
 
   try {
     return await crypto.subtle.importKey(
       "raw",
-      result.hash,
+      toArrayBuffer(result.hash),
       { name: SLS_CONSTANTS.AES.NAME, length: SLS_CONSTANTS.AES.LENGTH },
       false,
       ["wrapKey", "unwrapKey"]

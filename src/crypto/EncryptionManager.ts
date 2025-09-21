@@ -2,15 +2,20 @@ import { SLS_CONSTANTS } from "../constants";
 import { base64ToBytes, bytesToBase64 } from "../utils/base64";
 import { CryptoError } from "../errors";
 
+function toArrayBuffer(u8: Uint8Array): ArrayBuffer {
+  if (u8.byteOffset === 0 && u8.byteLength === u8.buffer.byteLength && u8.buffer instanceof ArrayBuffer) {
+    return u8.buffer as ArrayBuffer;
+  }
+  return u8.slice().buffer as ArrayBuffer;
+}
+
 export class EncryptionManager {
-  /** Random base64 salt */
   generateSaltB64(): string {
     const salt = new Uint8Array(SLS_CONSTANTS.SALT_LEN);
     crypto.getRandomValues(salt);
     return bytesToBase64(salt);
   }
 
-  /** Create a new DEK (extractable so it can be wrapped; unwrapped for use with extractable=false) */
   async createDek(): Promise<CryptoKey> {
     try {
       return await crypto.subtle.generateKey(
@@ -28,7 +33,7 @@ export class EncryptionManager {
       const iv = new Uint8Array(SLS_CONSTANTS.AES.IV_LENGTH);
       crypto.getRandomValues(iv);
       const data = new TextEncoder().encode(JSON.stringify(obj));
-      const ct = await crypto.subtle.encrypt({ name: SLS_CONSTANTS.AES.NAME, iv }, key, data);
+      const ct = await crypto.subtle.encrypt({ name: SLS_CONSTANTS.AES.NAME, iv }, key, toArrayBuffer(data));
       return { iv: bytesToBase64(iv), ciphertext: bytesToBase64(ct) };
     } catch (e) {
       throw new CryptoError(`Encryption failed: ${(e as Error)?.message ?? e}`);
@@ -37,9 +42,9 @@ export class EncryptionManager {
 
   async decryptData<T = unknown>(key: CryptoKey, ivB64: string, ctB64: string): Promise<T> {
     try {
-      const iv = base64ToBytes(ivB64);
+      const iv = base64ToBytes(ivB64) as BufferSource;
       const ct = base64ToBytes(ctB64);
-      const pt = await crypto.subtle.decrypt({ name: SLS_CONSTANTS.AES.NAME, iv }, key, ct);
+      const pt = await crypto.subtle.decrypt({ name: SLS_CONSTANTS.AES.NAME, iv: iv }, key, toArrayBuffer(ct));
       return JSON.parse(new TextDecoder().decode(pt)) as T;
     } catch (e) {
       throw new CryptoError(`Decryption failed: ${(e as Error)?.message ?? e}`);
@@ -64,15 +69,15 @@ export class EncryptionManager {
     forWrapping = false
   ): Promise<CryptoKey> {
     try {
-      const iv = base64ToBytes(ivWrapB64);
+      const iv = base64ToBytes(ivWrapB64) as BufferSource;
       const wrapped = base64ToBytes(wrappedB64);
       return await crypto.subtle.unwrapKey(
         "raw",
-        wrapped,
+        toArrayBuffer(wrapped),
         kek,
-        { name: SLS_CONSTANTS.AES.NAME, iv },
+        { name: SLS_CONSTANTS.AES.NAME, iv: iv },
         { name: SLS_CONSTANTS.AES.NAME, length: SLS_CONSTANTS.AES.LENGTH },
-        forWrapping, // extractable if we need to wrap again
+        forWrapping,
         forWrapping ? ["wrapKey", "unwrapKey", "encrypt", "decrypt"] : ["encrypt", "decrypt"]
       );
     } catch (e) {

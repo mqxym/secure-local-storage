@@ -31,11 +31,7 @@ export class SecureLocalStorage {
   private ready: Promise<void>;
 
   constructor(opts?: SecureLocalStorageOptions) {
-    this.store = new StorageService();
-    if (opts?.storageKey) {
-      // @ts-expect-error private override for advanced users/tests
-      this.store["key"] = opts.storageKey;
-    }
+    this.store = new StorageService(opts?.storageKey);
     this.ready = this.initialize();
   }
 

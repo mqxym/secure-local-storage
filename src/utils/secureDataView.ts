@@ -4,29 +4,24 @@ export type SecureDataView<T extends Record<string, unknown>> = T & {
   clear(): void;
 };
 
-/**
- * A proxy-backed view of decrypted data that can securely wipe its memory.
- * After .clear(), property access throws LockedError.
- */
 export function makeSecureDataView<T extends Record<string, unknown>>(
-  payload: T
+  payloadIn: T
 ): SecureDataView<T> {
   let cleared = false;
+  let payload: T = payloadIn;
 
   function clear() {
-    // Overwrite values recursively
     const overwrite = (obj: unknown) => {
       if (!obj || typeof obj !== "object") return;
-      for (const key of Object.keys(obj as Record<string, unknown>)) {
-        const v = (obj as Record<string, unknown>)[key];
+      const rec = obj as Record<string, unknown>;
+      for (const key of Object.keys(rec)) {
+        const v = rec[key];
         if (v && typeof v === "object") overwrite(v);
-        // @ts-expect-error safe overwrite
-        (obj as Record<string, unknown>)[key] = null;
+        rec[key] = null;
       }
     };
     overwrite(payload);
     cleared = true;
-    // @ts-expect-error invalidate reference
     payload = {} as T;
   }
 

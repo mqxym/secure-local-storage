@@ -50,8 +50,11 @@
     "argon2-browser": "^1.18.0"
   },
   "devDependencies": {
-    "@types/node": "^20.11.30",
-    "typescript": "^5.5.4",
-    "fake-indexeddb": "^6.0.1"
+    "@types/bun": "^1.2.22",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^24.5.2",
+    "bun-types": "^1.2.22",
+    "fake-indexeddb": "^6.0.1",
+    "typescript": "^5.5.4"
   }
 }
