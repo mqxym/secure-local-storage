@@ -1,0 +1,57 @@
+{
+  "name": "secure-local-storage",
+  "version": "0.1.0",
+  "description": "Secure arbitrary objects in localStorage using AES-GCM envelope encryption with device-bound KEK (IndexedDB) or Argon2id-derived KEK (master password).",
+  "license": "MIT",
+  "author": "mqxym",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mqyxm/secure-local-storage.git"
+  },
+  "homepage": "https://github.com/mqyxm/secure-local-storage#readme",
+  "bugs": {
+    "url": "https://github.com/mqxym/secure-local-storage/issues"
+  },
+  "keywords": [
+    "encryption",
+    "localStorage",
+    "aes-gcm",
+    "subtlecrypto",
+    "argon2",
+    "web-crypto",
+    "secure-storage",
+    "browser"
+  ],
+  "type": "module",
+  "main": "dist/cjs/index.cjs",
+  "module": "dist/esm/index.js",
+  "types": "dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "bun": ">=1.2.22"
+  },
+  "scripts": {
+    "build": "bun run bun.build.js && tsc -p tsconfig.types.json",
+    "test": "bun test",
+    "prepare": "bun run build"
+  },
+  "dependencies": {
+    "argon2-browser": "^1.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.30",
+    "typescript": "^5.5.4",
+    "fake-indexeddb": "^6.0.1"
+  }
+}

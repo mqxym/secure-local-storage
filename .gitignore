@@ -1,0 +1,9 @@
+node_modules/
+.DS_Store
+*.bun-build
+build/
+*.tmp
+scan*.md
+local-compiled/
+old_concept/
+dist/
