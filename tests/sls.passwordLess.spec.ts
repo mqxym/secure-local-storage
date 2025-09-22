@@ -31,4 +31,4 @@ describe("passwordless mode", () => {
     expect(data.v).toBe(1);
     data.clear();
   });
-});
+}); 

@@ -20,8 +20,11 @@ export async function deriveKekFromPassword(
   if (typeof password !== "string" || password.length === 0) {
     throw new ValidationError("Password must be a non-empty string");
   }
-  if (!(salt instanceof Uint8Array) || salt.byteLength < 8) {
-    throw new ValidationError("Salt must be Uint8Array with length >= 8");
+  if (!(salt instanceof Uint8Array) || salt.byteLength < SLS_CONSTANTS.SALT_LEN) {
+    throw new ValidationError(`Salt must be Uint8Array with length >= ${SLS_CONSTANTS.SALT_LEN}`);
+  }
+  if (!Number.isInteger(iterations) || iterations < 1) {
+    throw new ValidationError("iterations must be a positive integer");
   }
 
   let result: { hash: Uint8Array };

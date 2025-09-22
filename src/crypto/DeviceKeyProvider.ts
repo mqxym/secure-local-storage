@@ -9,31 +9,32 @@ export class DeviceKeyProvider {
   private static memoryKey: CryptoKey | null = null;
 
   static async getKey(): Promise<CryptoKey> {
+    // Always prefer an in-memory key within the current session.
+    if (this.memoryKey) return this.memoryKey;
+
     // If IndexedDB not available, use memory fallback
-    if (!("indexedDB" in globalThis)) {
-      if (this.memoryKey) return this.memoryKey;
+    if (!globalThis.indexedDB) {
       this.memoryKey = await this.generateKek();
       return this.memoryKey;
     }
 
     const db = await this.openDB().catch(() => null);
-    if (!db) {
-      // fallback to memory
-      if (this.memoryKey) return this.memoryKey;
-      this.memoryKey = await this.generateKek();
-      return this.memoryKey;
-    }
-
     try {
+      if (!db) {
+        this.memoryKey = await this.generateKek();
+        return this.memoryKey;
+      }
+
       const existing: CryptoKey | undefined = await new Promise((resolve, reject) => {
         const tx = db.transaction(SLS_CONSTANTS.IDB.STORE, "readonly");
         const req = tx.objectStore(SLS_CONSTANTS.IDB.STORE).get(SLS_CONSTANTS.IDB.ID);
         req.onsuccess = () => resolve(req.result?.key as CryptoKey | undefined);
         req.onerror = () => reject(req.error);
       });
+
       if (existing) {
-        db.close();
-        return existing;
+        this.memoryKey = existing;
+        return this.memoryKey;
       }
 
       const key = await this.generateKek();
@@ -43,45 +44,48 @@ export class DeviceKeyProvider {
         const put = tx.objectStore(SLS_CONSTANTS.IDB.STORE).put({ id: SLS_CONSTANTS.IDB.ID, key });
         put.onsuccess = () => resolve();
         put.onerror = () => reject(put.error);
-      }).catch(async () => {
+      }).catch(() => {
         // storing CryptoKey failed (structured clone not supported) -> memory fallback
-        this.memoryKey = key;
       });
 
-      db.close();
-      return this.memoryKey ?? key;
+      // Prefer in-memory identity within the session
+      this.memoryKey = key;
+      return this.memoryKey;
     } catch {
-      db.close();
-      // final fallback
       if (!this.memoryKey) this.memoryKey = await this.generateKek();
       return this.memoryKey;
+    } finally {
+      if (db) db.close();
     }
   }
 
   static async rotateKey(): Promise<CryptoKey> {
     const newKey = await this.generateKek();
+
     if (!("indexedDB" in globalThis)) {
       this.memoryKey = newKey;
       return newKey;
     }
+
     const db = await this.openDB().catch(() => null);
-    if (!db) {
-      this.memoryKey = newKey;
-      return newKey;
-    }
     try {
+      if (!db) {
+        this.memoryKey = newKey;
+        return newKey;
+      }
       await new Promise<void>((resolve, reject) => {
         const tx = db.transaction(SLS_CONSTANTS.IDB.STORE, "readwrite");
         const put = tx.objectStore(SLS_CONSTANTS.IDB.STORE).put({ id: SLS_CONSTANTS.IDB.ID, key: newKey });
         put.onsuccess = () => resolve();
         put.onerror = () => reject(put.error);
       });
-      db.close();
+      this.memoryKey = newKey; // keep identity stable within session
       return newKey;
     } catch {
-      db.close();
       this.memoryKey = newKey;
       return newKey;
+    } finally {
+      if (db) db.close();
     }
   }
 

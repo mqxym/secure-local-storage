@@ -1,4 +1,4 @@
-import { LockedError } from "../errors";
+import { LockedError, ValidationError } from "../errors";
 
 export type SecureDataView<T extends Record<string, unknown>> = T & {
   clear(): void;
@@ -32,16 +32,21 @@ export function makeSecureDataView<T extends Record<string, unknown>>(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return (payload as any)[prop];
     },
+    set() {
+      throw new ValidationError("SecureDataView is read-only; mutate via setData()");
+    },
     ownKeys() {
       if (cleared) throw new LockedError("Decrypted data was cleared");
       return [...Object.keys(payload), "clear"];
     },
-    getOwnPropertyDescriptor() {
-      return { enumerable: true, configurable: true };
+    getOwnPropertyDescriptor(_, prop: string) {
+      if (prop === "clear") return { configurable: true, enumerable: true, writable: false, value: clear };
+      if (cleared) throw new LockedError("Decrypted data was cleared");
+      return { configurable: true, enumerable: true };
     },
     has(_, prop) {
       if (prop === "clear") return true;
-      if (cleared) throw new LockedError();
+      if (cleared) throw new LockedError("Decrypted data was cleared");
       return Object.prototype.hasOwnProperty.call(payload, prop);
     }
   };

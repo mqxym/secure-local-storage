@@ -27,8 +27,12 @@ export class StorageService {
       if (check !== serialized) throw new StorageFullError("Failed to persist data");
     } catch (e) {
       const msg = (e as Error)?.message ?? String(e);
-      throw new StorageFullError(`localStorage quota exceeded (${estimateBytes(serialized)} bytes): ${msg}`);
-    }
+      const name = (e as { name?: string })?.name ?? "";
+      if (name === "QuotaExceededError") {
+        throw new StorageFullError(`localStorage quota exceeded (${estimateBytes(serialized)} bytes)`);
+      }
+      throw new StorageFullError(`Failed to persist data: ${msg}`);
+    } 
   }
 
   clear(): void {

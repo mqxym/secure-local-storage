@@ -15,7 +15,7 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "outDir": "build-tmp",
-    "types": []
+    "types": ["node", "jest"]
   },
   "include": ["src", "tests"]
 }

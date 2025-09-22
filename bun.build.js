@@ -1,9 +1,11 @@
 // Build ESM + CJS bundles with Bun, targeting browsers.
-const { rename, rm } = await import("fs/promises");
+const { rename, rm , cp} = await import("fs/promises");
+import path from "path";
 
 async function build() {
   // clean old build
   await rm("dist", { recursive: true }).catch(() => {});
+  await rm(path.resolve(__dirname, 'examples', 'dist'), { recursive: true }).catch(() => {});
 
   // ESM
   let esm = await Bun.build({
@@ -12,7 +14,12 @@ async function build() {
     target: "browser",
     format: "esm",
     minify: true,
-    sourcemap: "external"
+    sourcemap: "external",
+        naming: {
+    entry: "sls.browser.min.[ext]",
+    chunk: "[name]-[hash].[ext]",
+    asset: "[name].[ext]",
+  },
   });
   if (!esm.success) {
     console.error("ESM build failed", esm.logs);
@@ -26,7 +33,12 @@ async function build() {
     target: "browser",
     format: "cjs",
     minify: true,
-    sourcemap: "external"
+    sourcemap: "external",
+    naming: {
+    entry: "sls.browser.min.[ext]",
+    chunk: "[name]-[hash].[ext]",
+    asset: "[name].[ext]",
+  },
   });
   if (!cjs.success) {
     console.error("CJS build failed", cjs.logs);
@@ -41,4 +53,15 @@ async function build() {
   }
 }
 
+async function copyEsmDistToExamples() {
+  const srcDir = path.resolve(__dirname, 'dist', 'esm');
+  const destDir = path.resolve(__dirname, 'examples', 'dist');
+
+  // The recursive: true option makes sure all subdirectories + files are copied
+  await cp(srcDir, destDir, { recursive: true });
+  console.log('Copied esm dist to examples/dist');
+}
+
+
 await build();
+await copyEsmDistToExamples();

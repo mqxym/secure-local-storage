@@ -7,14 +7,23 @@ export function bytesToBase64(bytes: ArrayBuffer | Uint8Array): string {
   return Buffer.from(binary, "binary").toString("base64");
 }
 
+import { ValidationError } from "../errors";
+
 export function base64ToBytes(b64: string): Uint8Array {
-  if (typeof atob === "function") {
-    const binary = atob(b64);
-    const out = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
-    return out;
+  if (typeof b64 !== "string" || b64.length === 0) {
+    throw new ValidationError("Base64 input must be a non-empty string");
   }
-  // @ts-ignore
-  const buf = Buffer.from(b64, "base64");
-  return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+  try {
+    if (typeof atob === "function") {
+      const binary = atob(b64);
+      const out = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
+      return out;
+    }
+    // @ts-ignore
+    const buf = Buffer.from(b64, "base64");
+    return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+  } catch {
+    throw new ValidationError("Invalid base64 input");
+  }
 }

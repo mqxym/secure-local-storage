@@ -5,7 +5,7 @@ import { SessionKeyCache } from "../crypto/SessionKeyCache";
 import { SLS_CONSTANTS } from "../constants";
 import { StorageService } from "../storage/StorageService";
 import type { PersistedConfigV2 } from "../types";
-import { base64ToBytes, bytesToBase64 } from "../utils/base64";
+import { base64ToBytes } from "../utils/base64";
 import { toPlainJson } from "../utils/json";
 import { makeSecureDataView, SecureDataView } from "../utils/secureDataView";
 import {
@@ -37,6 +37,11 @@ export class SecureLocalStorage {
 
   // --------------------------- public API ---------------------------
 
+  public isUsingMasterPassword(): boolean {
+    return (this.config?.header.rounds ?? 1) > 1;
+  }
+
+
   /** Unlock session with master password (no-op in device mode). */
   async unlock(masterPassword: string): Promise<void> {
     await this.ready;
@@ -45,8 +50,13 @@ export class SecureLocalStorage {
 
     const { salt, rounds } = this.config.header;
     const kek = await deriveKekFromPassword(masterPassword, base64ToBytes(salt), rounds);
-    this.session.set(kek, salt, rounds);
-    await this.unwrapDekWithKek(kek, false);
+    try {
+      this.session.set(kek, salt, rounds);
+      await this.unwrapDekWithKek(kek, false);
+    } catch {
+      this.session.clear();
+      throw new ValidationError("Invalid master password");
+    }
   }
 
   /** Set a master password (switch from device mode to master mode). */
@@ -203,10 +213,14 @@ export class SecureLocalStorage {
       return JSON.stringify(copy);
     }
 
+    if (!customExportPassword && !this.isUsingMasterPassword()) {
+      throw new ExportError("Export password required in device mode");
+    }
+
     try {
       // Re-wrap DEK with export KEK
       const exportSaltB64 = this.enc.generateSaltB64();
-      const exportKek = await deriveKekFromPassword(customExportPassword ?? "", base64ToBytes(exportSaltB64));
+      const exportKek = await deriveKekFromPassword(customExportPassword!, base64ToBytes(exportSaltB64));
 
       // Unwrap current DEK for wrapping using active KEK
       if (this.isUsingMasterPassword()) {
@@ -272,30 +286,32 @@ export class SecureLocalStorage {
       return;
     }
 
-    // Export-password protected -> rewrap to device KEK and store as device mode
     if (!password) throw new ImportError("Export password required to import");
-    const exportKek = await deriveKekFromPassword(password, base64ToBytes(bundle.header.salt), bundle.header.rounds);
 
-    // Unwrap DEK for wrapping, then rewrap with device KEK
-    const extractableDek = await this.enc.unwrapDek(bundle.header.iv, bundle.header.wrappedKey, exportKek, true);
-    const deviceKek = await DeviceKeyProvider.getKey();
-    const { ivWrap, wrappedKey } = await this.enc.wrapDek(extractableDek, deviceKek);
+    try {
+      const exportKek = await deriveKekFromPassword(password, base64ToBytes(bundle.header.salt), bundle.header.rounds);
+      const extractableDek = await this.enc.unwrapDek(bundle.header.iv, bundle.header.wrappedKey, exportKek, true);
+      const deviceKek = await DeviceKeyProvider.getKey();
+      const { ivWrap, wrappedKey } = await this.enc.wrapDek(extractableDek, deviceKek);
 
-    // Store bundle in device mode
-    this.config = {
-      header: {
-        v: SLS_CONSTANTS.CURRENT_DATA_VERSION,
-        salt: "",
-        rounds: 1,
-        iv: ivWrap,
-        wrappedKey
-      },
-      data: bundle.data
-    };
-    // Keep session unlocked for convenience
-    this.dek = await this.enc.unwrapDek(ivWrap, wrappedKey, deviceKek, false);
-    this.session.clear();
-    this.persist();
+      // Store bundle in device mode
+      this.config = {
+        header: {
+          v: SLS_CONSTANTS.CURRENT_DATA_VERSION,
+          salt: "",
+          rounds: 1,
+          iv: ivWrap,
+          wrappedKey
+        },
+        data: bundle.data
+      };
+      // Keep session unlocked for convenience
+      this.dek = await this.enc.unwrapDek(ivWrap, wrappedKey, deviceKek, false);
+      this.session.clear();
+      this.persist();
+    } catch (e) {
+      throw new ImportError("Invalid export password or corrupted export data");
+    }
   }
 
   /** Clear all data (localStorage + IndexedDB KEK) and reinitialize fresh empty store in device mode. */
@@ -311,13 +327,23 @@ export class SecureLocalStorage {
   // --------------------------- private helpers ---------------------------
 
   private async initialize(forceFresh = false): Promise<void> {
-    const existing = !forceFresh ? this.store.get() : null;
-    if (!existing) {
-      // Fresh initialization in device mode
+    const isValidConfig = (cfg: PersistedConfigV2 | null): cfg is PersistedConfigV2 => {
+      return !!cfg
+        && cfg.header?.v === SLS_CONSTANTS.CURRENT_DATA_VERSION
+        && typeof cfg.header.iv === "string"
+        && typeof cfg.header.wrappedKey === "string"
+        && typeof cfg.header.rounds === "number"
+        && cfg.header.rounds >= 1
+        && !!cfg.data
+        && typeof cfg.data.iv === "string"
+        && typeof cfg.data.ciphertext === "string";
+    };
+
+    // If we are forced fresh, build a new device-mode store immediately.
+    if (forceFresh) {
       const dek = await this.enc.createDek();
       const deviceKek = await DeviceKeyProvider.getKey();
       const { ivWrap, wrappedKey } = await this.enc.wrapDek(dek, deviceKek);
-      // Keep DEK unwrapped in memory for device mode
       const unwrappedDek = await this.enc.unwrapDek(ivWrap, wrappedKey, deviceKek, false);
       const { iv, ciphertext } = await this.enc.encryptData(unwrappedDek, {}); // empty object
 
@@ -336,15 +362,21 @@ export class SecureLocalStorage {
       return;
     }
 
-    // Adopt existing config
+    const existing = this.store.get();
+    if (!isValidConfig(existing)) {
+      await this.initialize(true);
+      return;
+    }
+
     this.config = existing;
+
+    // Auto-unlock in device mode
     if (!this.isUsingMasterPassword()) {
-      // auto-unlock in device mode
       const deviceKek = await DeviceKeyProvider.getKey();
       try {
         this.dek = await this.enc.unwrapDek(existing.header.iv, existing.header.wrappedKey, deviceKek, false);
       } catch {
-        // If device KEK changed or lost, we can't recover; reset to fresh
+        // Cannot unwrap with current device KEK -> start fresh
         await this.initialize(true);
       }
     }
@@ -353,11 +385,7 @@ export class SecureLocalStorage {
   private persist(): void {
     this.store.set(this.config!);
   }
-
-  private isUsingMasterPassword(): boolean {
-    return (this.config?.header.rounds ?? 1) > 1;
-  }
-
+  
   private requireConfig(): void {
     if (!this.config) throw new ImportError("No configuration present");
   }
@@ -369,7 +397,7 @@ export class SecureLocalStorage {
   private sessionKekOrThrow(): CryptoKey {
     const { salt, rounds } = this.config!.header;
     const kek = this.session.match(salt, rounds);
-    if (!kek) throw new LockedError("Session locked (no derived KEK)");
+    if (!kek) throw new LockedError("Session locked.");
     return kek;
   }
 

@@ -1,6 +1,6 @@
 import { SLS_CONSTANTS } from "../constants";
 import { base64ToBytes, bytesToBase64 } from "../utils/base64";
-import { CryptoError } from "../errors";
+import { CryptoError, ValidationError } from "../errors";
 
 function toArrayBuffer(u8: Uint8Array): ArrayBuffer {
   if (u8.byteOffset === 0 && u8.byteLength === u8.buffer.byteLength && u8.buffer instanceof ArrayBuffer) {
@@ -41,10 +41,11 @@ export class EncryptionManager {
   }
 
   async decryptData<T = unknown>(key: CryptoKey, ivB64: string, ctB64: string): Promise<T> {
+    if (!ivB64 || !ctB64) throw new ValidationError("IV and ciphertext are required");
     try {
       const iv = base64ToBytes(ivB64) as BufferSource;
       const ct = base64ToBytes(ctB64);
-      const pt = await crypto.subtle.decrypt({ name: SLS_CONSTANTS.AES.NAME, iv: iv }, key, toArrayBuffer(ct));
+      const pt = await crypto.subtle.decrypt({ name: SLS_CONSTANTS.AES.NAME, iv }, key, toArrayBuffer(ct));
       return JSON.parse(new TextDecoder().decode(pt)) as T;
     } catch (e) {
       throw new CryptoError(`Decryption failed: ${(e as Error)?.message ?? e}`);
