@@ -1,0 +1,37 @@
+name: Build and Release Package and CLI
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  publish-npm:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+        - uses: actions/checkout@v5
+
+        - uses: oven-sh/setup-bun@v2
+          with:
+            bun-version: latest
+
+        - run: bun ci
+        - run: bun test
+        - run: bun run build
+
+        - uses: actions/setup-node@v5
+          with:
+            registry-url: https://registry.npmjs.org/
+            node-version: 20
+            scope: '@mqxym'
+
+        - run: npm publish --access public --provenance
+          env:
+            NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

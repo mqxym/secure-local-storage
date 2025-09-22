@@ -42,13 +42,52 @@ export class EncryptionManager {
 
   async decryptData<T = unknown>(key: CryptoKey, ivB64: string, ctB64: string): Promise<T> {
     if (!ivB64 || !ctB64) throw new ValidationError("IV and ciphertext are required");
+
+    let iv: BufferSource;
+    let ct: Uint8Array;
     try {
-      const iv = base64ToBytes(ivB64) as BufferSource;
-      const ct = base64ToBytes(ctB64);
-      const pt = await crypto.subtle.decrypt({ name: SLS_CONSTANTS.AES.NAME, iv }, key, toArrayBuffer(ct));
-      return JSON.parse(new TextDecoder().decode(pt)) as T;
+      iv = base64ToBytes(ivB64) as BufferSource;
+      ct = base64ToBytes(ctB64);
     } catch (e) {
-      throw new CryptoError(`Decryption failed: ${(e as Error)?.message ?? e}`);
+      throw e;
+    }
+
+    let pt: ArrayBuffer;
+    try {
+      pt = await crypto.subtle.decrypt({ name: SLS_CONSTANTS.AES.NAME, iv }, key, toArrayBuffer(ct));
+    } catch (e) {
+      throw new CryptoError(`Decryption failed: Invalid Data?`);
+    }
+
+    try {
+      return JSON.parse(new TextDecoder().decode(pt)) as T;
+    } catch {
+      throw new ValidationError("Decrypted data is not valid JSON");
+    }
+  }
+
+  async unwrapDek(ivWrapB64: string, wrappedB64: string, kek: CryptoKey, forWrapping = false): Promise<CryptoKey> {
+    let iv: BufferSource;
+    let wrapped: Uint8Array;
+    try {
+      iv = base64ToBytes(ivWrapB64) as BufferSource; // may throw ValidationError
+      wrapped = base64ToBytes(wrappedB64);
+    } catch (e) {
+      throw e; // propagate ValidationError
+    }
+
+    try {
+      return await crypto.subtle.unwrapKey(
+        "raw",
+        toArrayBuffer(wrapped),
+        kek,
+        { name: SLS_CONSTANTS.AES.NAME, iv },
+        { name: SLS_CONSTANTS.AES.NAME, length: SLS_CONSTANTS.AES.LENGTH },
+        forWrapping,
+        forWrapping ? ["wrapKey", "unwrapKey", "encrypt", "decrypt"] : ["encrypt", "decrypt"]
+      );
+    } catch (e) {
+      throw new CryptoError("Key unwrapping failed. Invalid data?");
     }
   }
 
@@ -60,29 +99,6 @@ export class EncryptionManager {
       return { ivWrap: bytesToBase64(iv), wrappedKey: bytesToBase64(wrapped) };
     } catch (e) {
       throw new CryptoError(`wrapKey failed: ${(e as Error)?.message ?? e}`);
-    }
-  }
-
-  async unwrapDek(
-    ivWrapB64: string,
-    wrappedB64: string,
-    kek: CryptoKey,
-    forWrapping = false
-  ): Promise<CryptoKey> {
-    try {
-      const iv = base64ToBytes(ivWrapB64) as BufferSource;
-      const wrapped = base64ToBytes(wrappedB64);
-      return await crypto.subtle.unwrapKey(
-        "raw",
-        toArrayBuffer(wrapped),
-        kek,
-        { name: SLS_CONSTANTS.AES.NAME, iv: iv },
-        { name: SLS_CONSTANTS.AES.NAME, length: SLS_CONSTANTS.AES.LENGTH },
-        forWrapping,
-        forWrapping ? ["wrapKey", "unwrapKey", "encrypt", "decrypt"] : ["encrypt", "decrypt"]
-      );
-    } catch (e) {
-      throw new CryptoError(`unwrapKey failed: ${(e as Error)?.message ?? e}`);
     }
   }
 }

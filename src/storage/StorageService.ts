@@ -19,6 +19,14 @@ export class StorageService {
     try { return JSON.parse(raw) as PersistedConfigV2; } catch { return null; }
   }
 
+  _isQuotaExceeded(err: unknown): boolean {
+    const e = err as { name?: string; code?: number; message?: string };
+    return e?.name === "QuotaExceededError" ||
+          e?.name === "NS_ERROR_DOM_QUOTA_REACHED" ||
+          typeof e?.message === "string" && /quota/i.test(e.message) ||
+          e?.code === 22 || e?.code === 1014; // Safari/Firefox DOMException codes
+  }
+
   set(cfg: PersistedConfigV2): void {
     const serialized = JSON.stringify(cfg);
     try {
@@ -26,13 +34,12 @@ export class StorageService {
       const check = localStorage.getItem(this.key);
       if (check !== serialized) throw new StorageFullError("Failed to persist data");
     } catch (e) {
-      const msg = (e as Error)?.message ?? String(e);
-      const name = (e as { name?: string })?.name ?? "";
-      if (name === "QuotaExceededError") {
+      if (this._isQuotaExceeded(e)) {
         throw new StorageFullError(`localStorage quota exceeded (${estimateBytes(serialized)} bytes)`);
       }
+      const msg = (e as Error)?.message ?? String(e);
       throw new StorageFullError(`Failed to persist data: ${msg}`);
-    } 
+    }
   }
 
   clear(): void {

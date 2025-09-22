@@ -1,5 +1,5 @@
-import "./setup";
-import secureLocalStorage from "../src";
+import "./../setup";
+import secureLocalStorage from "../../src";
 
 describe("passwordless mode", () => {
   it("set/get/clear", async () => {

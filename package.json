@@ -1,6 +1,6 @@
 {
-  "name": "secure-local-storage",
-  "version": "0.1.0",
+  "name": "@mqxym/secure-local-storage",
+  "version": "0.4.0",
   "description": "Secure arbitrary objects in localStorage using AES-GCM envelope encryption with device-bound KEK (IndexedDB) or Argon2id-derived KEK (master password).",
   "license": "MIT",
   "author": "mqxym",
@@ -23,14 +23,14 @@
     "browser"
   ],
   "type": "module",
-  "main": "dist/cjs/index.cjs",
-  "module": "dist/esm/index.js",
+  "main": "dist/cjs/sls.browser.min.cjs",
+  "module": "dist/esm/sls.browser.min.js",
   "types": "dist/types/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/types/index.d.ts",
-      "import": "./dist/esm/index.js",
-      "require": "./dist/cjs/index.cjs"
+      "import": "./dist/esm/sls.browser.min.js",
+      "require": "./dist/cjs/sls.browser.min.cjs"
     }
   },
   "files": [

@@ -54,6 +54,16 @@ await sls.importData(exported, "export-pass");        // imports and rewraps to 
 ```ts
 const sls = secureLocalStorage();
 
+// Customized usage
+const sls = secureLocalStorage({
+  storageKey: "tenant:123", // override localStorage key
+  idbConfig: {
+    dbName: "SLS_KEYS_TENANT123", // override IndexedDB database name
+    storeName: "keys",           // override object store name
+    keyId: "deviceKek_v1"        // override key record id
+  }
+});
+
 // Session / mode
 await sls.unlock(masterPassword: string);
 await sls.setMasterPassword(masterPassword: string);
@@ -98,7 +108,7 @@ await sls.clear(); // clears localStorage & IndexedDB and reinitializes in devic
 ### Input validation & limits
 
 * All public APIs validate input types and session/mode invariants.
-* `localStorage` quotas vary by browser (commonly \~5–10 MB). The library throws a `StorageFullError` if writing exceeds quota.
+* `localStorage` quotas vary by browser (commonly \~5-10 MB). The library throws a `StorageFullError` if writing exceeds quota.
 * Data must be **JSON‑serializable**.
 
 ### Browser support
@@ -112,8 +122,8 @@ bun test
 bun run build
 ```
 
-* ESM output: `dist/esm/index.js`
-* CJS output: `dist/cjs/index.cjs`
+* ESM output: `dist/esm/sls.browser.min.js`
+* CJS output: `dist/cjs/sls.browser.min.cjs`
 * Types: `dist/types/index.d.ts`
 
 ### CI/CD

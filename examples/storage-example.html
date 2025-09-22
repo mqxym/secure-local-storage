@@ -17,7 +17,7 @@
 <body class="text-white">
   <nav class="navbar navbar-dark bg-dark mb-4 shadow-sm">
     <div class="container-fluid">
-      <span class="navbar-brand">🔐 secure-local-storage — Demo</span>
+      <span class="navbar-brand">secure-local-storage — Demo</span>
       <div class="d-flex gap-2 align-items-center">
         <span class="badge rounded-pill badge-soft" id="modeBadge">mode: unknown</span>
         <span class="badge rounded-pill badge-amber" id="lockBadge">locked: unknown</span>
@@ -94,7 +94,7 @@
               </div>
               <div class="col-md-5 d-flex gap-2">
                 <button class="btn btn-primary flex-fill" id="btnExport">Export</button>
-                <button class="btn btn-outline-light flex-fill" id="btnDownload">Download</button>
+                <button class="btn btn-outline-dark flex-fill" id="btnDownload">Download</button>
               </div>
             </div>
             <label class="form-label">Export JSON</label>
@@ -111,7 +111,7 @@
               </div>
               <div class="col-md-5 d-flex gap-2">
                 <button class="btn btn-success flex-fill" id="btnImport">Import</button>
-                <button class="btn btn-outline-light flex-fill" id="btnLoadFile">Load file…</button>
+                <button class="btn btn-outline-dark flex-fill" id="btnLoadFile">Load file…</button>
                 <input type="file" class="d-none" id="fileOpen" accept="application/json,.json" />
               </div>
             </div>
@@ -337,7 +337,7 @@
     btnLock.addEventListener("click", () => {
       sls.lock();
       setLocked(true);
-      showAlert("warning", "Locked (device mode may auto‑unlock on next read)");
+      showAlert("warning", "Locked (device mode may auto-unlock on next read)");
       log("lock ✓");
     });
 

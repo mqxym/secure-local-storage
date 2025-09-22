@@ -23,10 +23,10 @@ export async function deriveKekFromPassword(
   if (!(salt instanceof Uint8Array) || salt.byteLength < SLS_CONSTANTS.SALT_LEN) {
     throw new ValidationError(`Salt must be Uint8Array with length >= ${SLS_CONSTANTS.SALT_LEN}`);
   }
-  if (!Number.isInteger(iterations) || iterations < 1) {
-    throw new ValidationError("iterations must be a positive integer");
+  const MAX_ITERATIONS = 64;
+  if (!Number.isInteger(iterations) || iterations < 1 || iterations > MAX_ITERATIONS) {
+    throw new ValidationError(`iterations must be an integer in [1, ${MAX_ITERATIONS}]`);
   }
-
   let result: { hash: Uint8Array };
   try {
     result = await argon2.hash({

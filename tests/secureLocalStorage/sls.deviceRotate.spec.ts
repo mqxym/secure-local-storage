@@ -1,5 +1,5 @@
-import "./setup";
-import secureLocalStorage from "../src";
+import "./../setup";
+import secureLocalStorage from "../../src";
 
 describe("device mode key rotation", () => {
   it("rotateKeys preserves data while re-encrypting", async () => {

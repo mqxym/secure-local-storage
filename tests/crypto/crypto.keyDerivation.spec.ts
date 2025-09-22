@@ -1,6 +1,6 @@
-import "./setup";
-import { deriveKekFromPassword } from "../src/crypto/KeyDerivation";
-import { CryptoError, ValidationError } from "../src/errors";
+import "./../setup";
+import { deriveKekFromPassword } from "../../src/crypto/KeyDerivation";
+import { CryptoError, ValidationError } from "../../src/errors";
 // No types for the mock; treat as any
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore
@@ -19,5 +19,18 @@ describe("KeyDerivation", () => {
     const spy = jest.spyOn(argon2, "hash").mockRejectedValueOnce(new Error("boom"));
     await expect(deriveKekFromPassword("pw", new Uint8Array(16))).rejects.toBeInstanceOf(CryptoError);
     spy.mockRestore();
+  });
+});
+
+describe("KeyDerivation - extra input validation", () => {
+  it("rejects non-integer or non-positive iteration counts", async () => {
+    await expect(deriveKekFromPassword("pw", new Uint8Array(16), 0)).rejects.toBeInstanceOf(ValidationError);
+    // 1.5 should be invalid
+    await expect(deriveKekFromPassword("pw", new Uint8Array(16), 1.5)).rejects.toBeInstanceOf(ValidationError);
+    await expect(deriveKekFromPassword("pw", new Uint8Array(16), -1)).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  it("rejects unreasonably high iteration counts", async () => {
+    await expect(deriveKekFromPassword("pw", new Uint8Array(16), 10_000)).rejects.toBeInstanceOf(ValidationError);
   });
 });

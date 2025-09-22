@@ -1,6 +1,6 @@
-import "./setup";
-import secureLocalStorage from "../src";
-import { LockedError } from "../src/errors";
+import "./../setup";
+import secureLocalStorage from "../../src";
+import { LockedError } from "../../src/errors";
 
 describe("SecureDataView edge cases", () => {
   it("enumeration and has-trap behavior before and after clear()", async () => {

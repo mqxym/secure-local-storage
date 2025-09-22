@@ -1,7 +1,7 @@
-import "./setup";
-import { EncryptionManager } from "../src/crypto/EncryptionManager";
-import { base64ToBytes, bytesToBase64 } from "../src/utils/base64";
-import { CryptoError } from "../src/errors";
+import "./../setup";
+import { EncryptionManager } from "../../src/crypto/EncryptionManager";
+import { base64ToBytes, bytesToBase64 } from "../../src/utils/base64";
+import { CryptoError } from "../../src/errors";
 
 describe("EncryptionManager", () => {
   it("decryptData fails with wrong key and with tampered ciphertext", async () => {

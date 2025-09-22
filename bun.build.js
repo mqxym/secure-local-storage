@@ -47,7 +47,7 @@ async function build() {
 
   // Rename main file to .cjs for Node resolution with "type": "module"
   try {
-    await rename("dist/cjs/index.js", "dist/cjs/index.cjs");
+    await rename("dist/cjs/sls.browser.min.js", "dist/cjs/sls.browser.min.cjs");
   } catch (e) {
     // no-op if already correct
   }

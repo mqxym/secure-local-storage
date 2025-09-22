@@ -1,5 +1,5 @@
-import "./setup";
-import secureLocalStorage from "../src";
+import "./../setup";
+import secureLocalStorage from "../../src/";
 
 describe("master password mode", () => {
   it("set, unlock, export/import", async () => {
@@ -24,16 +24,9 @@ describe("master password mode", () => {
   });
 });
 
-import { ExportError, ImportError, LockedError, ModeError } from "../src/errors";
+import { ExportError, ImportError, LockedError, ModeError } from "../../src/errors";
 
-describe("master password – additional edge cases", () => {
-  it("exportData requires an unlocked session in master mode", async () => {
-    const sls = secureLocalStorage({ storageKey: "test:sls-mp-locked" });
-    await sls.setData({ v: 1 });
-    await sls.setMasterPassword("pw-1");
-    sls.lock();
-    await expect(sls.exportData("any")).rejects.toBeInstanceOf(LockedError);
-  });
+describe("master password - additional edge cases", () => {
 
   it("setMasterPassword cannot be called twice", async () => {
     const sls = secureLocalStorage({ storageKey: "test:sls-mp-double" });

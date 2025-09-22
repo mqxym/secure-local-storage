@@ -9,7 +9,6 @@ import { base64ToBytes } from "../utils/base64";
 import { toPlainJson } from "../utils/json";
 import { makeSecureDataView, SecureDataView } from "../utils/secureDataView";
 import {
-  CryptoError,
   ExportError,
   ImportError,
   LockedError,
@@ -20,6 +19,12 @@ import {
 export interface SecureLocalStorageOptions {
   /** Override the localStorage key (for multi-tenant apps or tests). */
   storageKey?: string;
+  /** Override IndexedDB configuration (for multi-tenant apps or tests). */
+  idbConfig?: {
+    dbName?: string;
+    storeName?: string;
+    keyId?: string;
+  };
 }
 
 export class SecureLocalStorage {
@@ -29,9 +34,17 @@ export class SecureLocalStorage {
   private config: PersistedConfigV2 | null = null;
   private dek: CryptoKey | null = null;
   private ready: Promise<void>;
+  private readonly idbConfig: { dbName: string; storeName: string; keyId: string };
+
 
   constructor(opts?: SecureLocalStorageOptions) {
     this.store = new StorageService(opts?.storageKey);
+    this.idbConfig = {
+      dbName: opts?.idbConfig?.dbName ?? SLS_CONSTANTS.IDB.DB_NAME,
+      storeName: opts?.idbConfig?.storeName ?? SLS_CONSTANTS.IDB.STORE,
+      keyId: opts?.idbConfig?.keyId ?? SLS_CONSTANTS.IDB.ID,
+    };
+
     this.ready = this.initialize();
   }
 
@@ -70,7 +83,7 @@ export class SecureLocalStorage {
       throw new ValidationError("masterPassword must be a non-empty string");
     }
     // Unwrap existing DEK for wrapping using device KEK
-    const deviceKek = await DeviceKeyProvider.getKey();
+    const deviceKek = await DeviceKeyProvider.getKey(this.idbConfig);
     await this.unwrapDekWithKek(deviceKek, true);
 
     const saltB64 = this.enc.generateSaltB64();
@@ -99,7 +112,7 @@ export class SecureLocalStorage {
     if (!this.isUsingMasterPassword()) throw new ModeError("No master password is set");
     this.requireUnlocked();
 
-    const deviceKek = await DeviceKeyProvider.getKey();
+    const deviceKek = await DeviceKeyProvider.getKey(this.idbConfig);
     // Ensure DEK is extractable for wrap
     await this.unwrapDekWithKek(this.sessionKekOrThrow(), true);
     const { ivWrap, wrappedKey } = await this.enc.wrapDek(this.dek!, deviceKek);
@@ -121,8 +134,41 @@ export class SecureLocalStorage {
   /** Rotate master password atomically. */
   async rotateMasterPassword(oldMasterPassword: string, newMasterPassword: string): Promise<void> {
     await this.ready;
+    this.requireConfig();
+
+    if (typeof newMasterPassword !== "string" || newMasterPassword.length === 0) {
+      throw new ValidationError("newMasterPassword must be a non-empty string");
+    }
+
+    if (!this.isUsingMasterPassword()) {
+      // unlock() is a no-op in device mode
+      await this.unlock(oldMasterPassword);
+      await this.setMasterPassword(newMasterPassword);
+      return;
+    }
+
     await this.unlock(oldMasterPassword);
-    await this.setMasterPassword(newMasterPassword);
+    this.requireUnlocked();
+
+    await this.unwrapDekWithKek(this.sessionKekOrThrow(), true);
+
+    const saltB64 = this.enc.generateSaltB64();
+    const rounds = SLS_CONSTANTS.ARGON2.ITERATIONS;
+    const newKek = await deriveKekFromPassword(newMasterPassword, base64ToBytes(saltB64), rounds);
+    const { ivWrap, wrappedKey } = await this.enc.wrapDek(this.dek!, newKek);
+
+    this.config!.header = {
+      v: SLS_CONSTANTS.CURRENT_DATA_VERSION,
+      salt: saltB64,
+      rounds,
+      iv: ivWrap,
+      wrappedKey
+    };
+
+    this.session.set(newKek, saltB64, rounds);
+    this.dek = await this.enc.unwrapDek(ivWrap, wrappedKey, newKek, false);
+
+    this.persist();
   }
 
   /** Lock the session (clears derived KEK & DEK from memory). */
@@ -138,7 +184,7 @@ export class SecureLocalStorage {
     if (this.isUsingMasterPassword()) {
       throw new ModeError("rotateKeys is allowed only in password-less mode");
     }
-    const deviceKek = await DeviceKeyProvider.getKey();
+    const deviceKek = await DeviceKeyProvider.getKey(this.idbConfig);
     // Unwrap current DEK to read & re-encrypt data
     await this.unwrapDekWithKek(deviceKek, false);
     const plain = await this.enc.decryptData<Record<string, unknown>>(
@@ -181,8 +227,11 @@ export class SecureLocalStorage {
       // empty object
       return makeSecureDataView({} as T);
     }
-    const obj = await this.enc.decryptData<T>(this.dek!, this.config!.data.iv, this.config!.data.ciphertext);
-    return makeSecureDataView(obj);
+    const obj = await this.enc.decryptData<unknown>(this.dek!, this.config!.data.iv, this.config!.data.ciphertext);
+    if (!obj || typeof obj !== "object" || Array.isArray(obj)) {
+      throw new ValidationError("Stored data must be a plain object");
+    }
+    return makeSecureDataView(obj as T);
   }
 
   /** Replace data with the provided plain object. */
@@ -200,12 +249,10 @@ export class SecureLocalStorage {
    * Export the encrypted bundle as JSON string.
    * - If `customExportPassword` provided: derive export KEK (Argon2id) and rewrap DEK accordingly (mPw=false).
    * - If absent and in master mode: exports current config wrapped with master password (mPw=true).
-   * - Requires unlocked session.
    */
   async exportData(customExportPassword?: string): Promise<string> {
     await this.ready;
     this.requireConfig();
-    this.requireUnlocked();
 
     if (!customExportPassword && this.isUsingMasterPassword()) {
       const copy = structuredClone(this.config!);
@@ -226,7 +273,7 @@ export class SecureLocalStorage {
       if (this.isUsingMasterPassword()) {
         await this.unwrapDekWithKek(this.sessionKekOrThrow(), true);
       } else {
-        const deviceKek = await DeviceKeyProvider.getKey();
+        const deviceKek = await DeviceKeyProvider.getKey(this.idbConfig);
         await this.unwrapDekWithKek(deviceKek, true);
       }
 
@@ -291,7 +338,7 @@ export class SecureLocalStorage {
     try {
       const exportKek = await deriveKekFromPassword(password, base64ToBytes(bundle.header.salt), bundle.header.rounds);
       const extractableDek = await this.enc.unwrapDek(bundle.header.iv, bundle.header.wrappedKey, exportKek, true);
-      const deviceKek = await DeviceKeyProvider.getKey();
+      const deviceKek = await DeviceKeyProvider.getKey(this.idbConfig);
       const { ivWrap, wrappedKey } = await this.enc.wrapDek(extractableDek, deviceKek);
 
       // Store bundle in device mode
@@ -328,21 +375,35 @@ export class SecureLocalStorage {
 
   private async initialize(forceFresh = false): Promise<void> {
     const isValidConfig = (cfg: PersistedConfigV2 | null): cfg is PersistedConfigV2 => {
-      return !!cfg
-        && cfg.header?.v === SLS_CONSTANTS.CURRENT_DATA_VERSION
-        && typeof cfg.header.iv === "string"
-        && typeof cfg.header.wrappedKey === "string"
-        && typeof cfg.header.rounds === "number"
-        && cfg.header.rounds >= 1
-        && !!cfg.data
-        && typeof cfg.data.iv === "string"
-        && typeof cfg.data.ciphertext === "string";
+      if (!cfg) return false;
+      const h = cfg.header;
+      const d = cfg.data;
+      if (!h || h.v !== SLS_CONSTANTS.CURRENT_DATA_VERSION) return false;
+      if (typeof h.rounds !== "number" || h.rounds < 1) return false;
+      if (typeof h.iv !== "string" || typeof h.wrappedKey !== "string") return false;
+      if (!d || typeof d.iv !== "string" || typeof d.ciphertext !== "string") return false;
+
+      if (h.rounds === 1) {
+        if (h.salt !== "") return false;
+      } else {
+        if (typeof h.salt !== "string" || h.salt.length === 0) return false;
+      }
+
+      try {
+        base64ToBytes(h.iv);
+        base64ToBytes(h.wrappedKey);
+        if (d.iv) base64ToBytes(d.iv);
+        if (d.ciphertext) base64ToBytes(d.ciphertext);
+      } catch {
+        return false;
+      }
+      return true;
     };
 
     // If we are forced fresh, build a new device-mode store immediately.
     if (forceFresh) {
       const dek = await this.enc.createDek();
-      const deviceKek = await DeviceKeyProvider.getKey();
+      const deviceKek = await DeviceKeyProvider.getKey(this.idbConfig);
       const { ivWrap, wrappedKey } = await this.enc.wrapDek(dek, deviceKek);
       const unwrappedDek = await this.enc.unwrapDek(ivWrap, wrappedKey, deviceKek, false);
       const { iv, ciphertext } = await this.enc.encryptData(unwrappedDek, {}); // empty object
@@ -372,12 +433,13 @@ export class SecureLocalStorage {
 
     // Auto-unlock in device mode
     if (!this.isUsingMasterPassword()) {
-      const deviceKek = await DeviceKeyProvider.getKey();
+      const deviceKek = await DeviceKeyProvider.getKey(this.idbConfig);
       try {
         this.dek = await this.enc.unwrapDek(existing.header.iv, existing.header.wrappedKey, deviceKek, false);
       } catch {
+        throw new ValidationError("Failed to unwrap DEK using device key. Tampered data?");
         // Cannot unwrap with current device KEK -> start fresh
-        await this.initialize(true);
+        // await this.initialize(true);
       }
     }
   }
@@ -407,7 +469,7 @@ export class SecureLocalStorage {
       const kek = this.sessionKekOrThrow();
       await this.unwrapDekWithKek(kek, false);
     } else {
-      const deviceKek = await DeviceKeyProvider.getKey();
+      const deviceKek = await DeviceKeyProvider.getKey(this.idbConfig);
       await this.unwrapDekWithKek(deviceKek, false);
     }
   }

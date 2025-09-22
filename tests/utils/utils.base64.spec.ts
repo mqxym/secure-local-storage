@@ -1,5 +1,5 @@
-import "./setup";
-import { base64ToBytes, bytesToBase64 } from "../src/utils/base64";
+import "./../setup";
+import { base64ToBytes, bytesToBase64 } from "../../src/utils/base64";
 
 describe("base64 utils", () => {
   it("round-trips bytes correctly", () => {

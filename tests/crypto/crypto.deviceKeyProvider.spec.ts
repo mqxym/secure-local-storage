@@ -1,5 +1,5 @@
-import "./setup";
-import { DeviceKeyProvider } from "../src/crypto/DeviceKeyProvider";
+import "./../setup";
+import { DeviceKeyProvider } from "../../src/crypto/DeviceKeyProvider";
 
 describe("DeviceKeyProvider", () => {
   it("falls back to in-memory key when indexedDB is missing", async () => {
