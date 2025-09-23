@@ -1,8 +1,5 @@
 import { SLS_CONSTANTS } from "../constants";
 import { CryptoError, ValidationError } from "../errors";
-// No module augmentation — treat as any-typed JS module
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore
 import * as argon2 from "argon2-browser";
 
 function toArrayBuffer(u8: Uint8Array): ArrayBuffer {
@@ -20,13 +17,16 @@ export async function deriveKekFromPassword(
   if (typeof password !== "string" || password.length === 0) {
     throw new ValidationError("Password must be a non-empty string");
   }
+  
   if (!(salt instanceof Uint8Array) || salt.byteLength < SLS_CONSTANTS.SALT_LEN) {
     throw new ValidationError(`Salt must be Uint8Array with length >= ${SLS_CONSTANTS.SALT_LEN}`);
   }
+
   const MAX_ITERATIONS = 64;
   if (!Number.isInteger(iterations) || iterations < 1 || iterations > MAX_ITERATIONS) {
     throw new ValidationError(`iterations must be an integer in [1, ${MAX_ITERATIONS}]`);
   }
+
   let result: { hash: Uint8Array };
   try {
     result = await argon2.hash({

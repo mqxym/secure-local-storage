@@ -35,6 +35,8 @@ export class SecureLocalStorage {
   private dek: CryptoKey | null = null;
   private ready: Promise<void>;
   private readonly idbConfig: { dbName: string; storeName: string; keyId: string };
+  
+  public readonly DATA_VERSION: number = SLS_CONSTANTS.CURRENT_DATA_VERSION;
 
 
   constructor(opts?: SecureLocalStorageOptions) {
@@ -301,7 +303,7 @@ export class SecureLocalStorage {
    * - Else expects export password.
    * After import, rewrap to device mode if using export password.
    */
-  async importData(serialized: string, password?: string): Promise<void> {
+  async importData(serialized: string, password?: string): Promise<string> {
     await this.ready;
     let bundle: PersistedConfigV2;
     try {
@@ -330,7 +332,7 @@ export class SecureLocalStorage {
       this.dek = null; // locked until unlock()
       this.session.clear();
       this.persist();
-      return;
+      return 'masterPassword';
     }
 
     if (!password) throw new ImportError("Export password required to import");
@@ -356,6 +358,7 @@ export class SecureLocalStorage {
       this.dek = await this.enc.unwrapDek(ivWrap, wrappedKey, deviceKek, false);
       this.session.clear();
       this.persist();
+      return 'customExportPassword'
     } catch (e) {
       throw new ImportError("Invalid export password or corrupted export data");
     }
@@ -437,9 +440,9 @@ export class SecureLocalStorage {
       try {
         this.dek = await this.enc.unwrapDek(existing.header.iv, existing.header.wrappedKey, deviceKek, false);
       } catch {
-        throw new ValidationError("Failed to unwrap DEK using device key. Tampered data?");
+        // throw new ValidationError("Failed to unwrap DEK using device key. Tampered data?");
         // Cannot unwrap with current device KEK -> start fresh
-        // await this.initialize(true);
+        await this.initialize(true);
       }
     }
   }

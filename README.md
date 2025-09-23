@@ -14,15 +14,15 @@ Built for browsers with the Web Crypto API. Bundled for ESM & CJS. Engine: **Bun
 ## Install
 
 ```bash
-bun add secure-local-storage
+bun add @mqxym/secure-local-storage
 # or
-npm i secure-local-storage
+npm i @mqxym/secure-local-storage
 ```
 
 ## Quick start
 
 ```ts
-import secureLocalStorage from "secure-local-storage";
+import secureLocalStorage from "@mqxym/secure-local-storage";
 
 const sls = secureLocalStorage(); // init (device mode by default)
 
@@ -53,6 +53,8 @@ await sls.importData(exported, "export-pass");        // imports and rewraps to 
 
 ```ts
 const sls = secureLocalStorage();
+
+console.log(sls.DATA_VERSION) // returns current data version (2)
 
 // Customized usage
 const sls = secureLocalStorage({

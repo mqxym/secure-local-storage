@@ -13,7 +13,12 @@ async function build() {
     outdir: "dist/esm",
     target: "browser",
     format: "esm",
-    minify: true,
+   minify: {
+      whitespace: true,
+      identifiers: false,
+      syntax: true,
+      keepNames: true,
+    },
     sourcemap: "external",
         naming: {
     entry: "sls.browser.min.[ext]",
@@ -32,7 +37,12 @@ async function build() {
     outdir: "dist/cjs",
     target: "browser",
     format: "cjs",
-    minify: true,
+    minify: {
+      whitespace: true,
+      identifiers: false,
+      syntax: true,
+      keepNames: true,
+    },
     sourcemap: "external",
     naming: {
     entry: "sls.browser.min.[ext]",

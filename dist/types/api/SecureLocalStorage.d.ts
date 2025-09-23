@@ -2,6 +2,12 @@ import { SecureDataView } from "../utils/secureDataView";
 export interface SecureLocalStorageOptions {
     /** Override the localStorage key (for multi-tenant apps or tests). */
     storageKey?: string;
+    /** Override IndexedDB configuration (for multi-tenant apps or tests). */
+    idbConfig?: {
+        dbName?: string;
+        storeName?: string;
+        keyId?: string;
+    };
 }
 export declare class SecureLocalStorage {
     private readonly store;
@@ -10,6 +16,8 @@ export declare class SecureLocalStorage {
     private config;
     private dek;
     private ready;
+    private readonly idbConfig;
+    readonly DATA_VERSION: number;
     constructor(opts?: SecureLocalStorageOptions);
     isUsingMasterPassword(): boolean;
     /** Unlock session with master password (no-op in device mode). */
@@ -40,7 +48,7 @@ export declare class SecureLocalStorage {
      * - Else expects export password.
      * After import, rewrap to device mode if using export password.
      */
-    importData(serialized: string, password?: string): Promise<void>;
+    importData(serialized: string, password?: string): Promise<string>;
     /** Clear all data (localStorage + IndexedDB KEK) and reinitialize fresh empty store in device mode. */
     clear(): Promise<void>;
     private initialize;

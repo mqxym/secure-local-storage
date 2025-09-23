@@ -54,7 +54,7 @@ export class EncryptionManager {
 
     let pt: ArrayBuffer;
     try {
-      pt = await crypto.subtle.decrypt({ name: SLS_CONSTANTS.AES.NAME, iv }, key, toArrayBuffer(ct));
+      pt = await crypto.subtle.decrypt({ name: SLS_CONSTANTS.AES.NAME, iv: iv }, key, toArrayBuffer(ct));
     } catch (e) {
       throw new CryptoError(`Decryption failed: Invalid Data?`);
     }
@@ -81,7 +81,7 @@ export class EncryptionManager {
         "raw",
         toArrayBuffer(wrapped),
         kek,
-        { name: SLS_CONSTANTS.AES.NAME, iv },
+        { name: SLS_CONSTANTS.AES.NAME, iv: iv },
         { name: SLS_CONSTANTS.AES.NAME, length: SLS_CONSTANTS.AES.LENGTH },
         forWrapping,
         forWrapping ? ["wrapKey", "unwrapKey", "encrypt", "decrypt"] : ["encrypt", "decrypt"]
