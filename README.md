@@ -11,6 +11,12 @@ Built for browsers with the Web Crypto API. Bundled for ESM & CJS. Engine: **Bun
 
 ---
 
+## Live Demo
+
+The demo includes most functionality provided by the API:
+[https://mqxym.github.io/secure-local-storage/storage-example.html](https://mqxym.github.io/secure-local-storage/storage-example.html)
+
+
 ## Install
 
 ```bash
