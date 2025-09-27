@@ -1,4 +1,5 @@
 import "fake-indexeddb/auto";
+import { mock } from "bun:test";
 
 import { webcrypto as nodeCrypto } from "node:crypto";
 if (!globalThis.crypto) {
@@ -6,7 +7,7 @@ if (!globalThis.crypto) {
   globalThis.crypto = nodeCrypto as unknown as Crypto;
 }
 
-jest.mock("argon2-browser", () => {
+mock.module("argon2-browser", () => {
   const te = new TextEncoder();
 
   async function kdfLikeDigest(
