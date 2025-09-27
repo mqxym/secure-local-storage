@@ -55,4 +55,29 @@ describe("StorageService - quota detection variants", () => {
       localStorage.removeItem(key);
     }
   });
+  it("wraps quota exceeded when error has numeric code 22", () => {
+    const key = "test:storage:quota:code22";
+    const s = new StorageService(key);
+    const cfg = {
+      header: { v: 2, salt: "", rounds: 1, iv: "iv", wrappedKey: "wk" },
+      data: { iv: "iv", ciphertext: "ct" }
+    };
+
+    const original = localStorage.setItem;
+    // @ts-ignore simulate numeric DOMException code path
+    localStorage.setItem = () => {
+      const e = new Error("dom code 22");
+      // @ts-ignore
+      e.code = 22;
+      throw e;
+    };
+
+    try {
+      expect(() => s.set(cfg as any)).toThrow(StorageFullError);
+    } finally {
+      // @ts-ignore
+      localStorage.setItem = original;
+      localStorage.removeItem(key);
+    }
+  });
 });

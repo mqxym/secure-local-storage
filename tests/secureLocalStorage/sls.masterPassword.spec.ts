@@ -103,4 +103,25 @@ describe("master password - additional edge cases", () => {
     const sls = secureLocalStorage({ storageKey: "test:sls-device-export" });
     await expect(sls.exportData()).rejects.toBeInstanceOf(ExportError);
   });
+  it("importData returns a discriminator of the protection used", async () => {
+    const sls = secureLocalStorage({ storageKey: "test:sls-import-type:src" });
+    await sls.setData({ a: 1 });
+    await sls.setMasterPassword("mp-1");
+
+    // Master-protected export
+    const exportedMP = await sls.exportData();
+    const sls2 = secureLocalStorage({ storageKey: "test:sls-import-type:dst1" });
+    await expect(sls2.importData(exportedMP, "mp-1")).resolves.toBe("masterPassword");
+
+    // Custom-password export
+    const exportedCustom = await sls.exportData("exp-1");
+    const sls3 = secureLocalStorage({ storageKey: "test:sls-import-type:dst2" });
+    await expect(sls3.importData(exportedCustom, "exp-1")).resolves.toBe("customExportPassword");
+  });
+
+  it("exportData rejects blank custom password in device mode", async () => {
+    const sls = secureLocalStorage({ storageKey: "test:sls-device-export-blank" });
+    await sls.setData({ x: 1 });
+    await expect(sls.exportData("")).rejects.toBeInstanceOf(ExportError);
+  });
 });

@@ -42,4 +42,17 @@ describe("SecureLocalStorage API - additional edge cases", () => {
     const v = await sls2.getData<{ a: number }>();
     expect(v.a).toBe(7); v.clear();
   });
+
+  it("unlock() rejects empty master password", async () => {
+    const sls = secureLocalStorage({ storageKey: "test:sls:empty-master-pw" });
+    await sls.setData({ v: 1 });
+    await sls.setMasterPassword("pw-1");
+    sls.lock();
+    await expect(sls.unlock("")).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  it("unlock() with no stored data resolves (no-op)", async () => {
+    const sls = secureLocalStorage({ storageKey: "test:sls:no-data-2" });
+    await expect(sls.unlock("anything")).resolves.toBeUndefined();
+  });
 });

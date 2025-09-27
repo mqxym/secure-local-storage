@@ -16,7 +16,6 @@ Built for browsers with the Web Crypto API. Bundled for ESM & CJS. Engine: **Bun
 The demo includes most functionality provided by the API:
 [https://mqxym.github.io/secure-local-storage/storage-example.html](https://mqxym.github.io/secure-local-storage/storage-example.html)
 
-
 ## Install
 
 ```bash
@@ -37,6 +36,10 @@ await sls.setData({ value1: 123, nested: { a: "b" } });
 const data = await sls.getData<{ value1: number; nested: { a: string } }>();
 console.log(data.value1); // 123
 data.clear();             // wipe decrypted copy from memory
+
+// getData() returns a write-protected object.
+// To modify it before passing into setData(), create a deep copy
+// (e.g., using JSON serialization).
 ```
 
 ### Master password
@@ -73,12 +76,13 @@ const sls = secureLocalStorage({
 });
 
 // Session / mode
-await sls.unlock(masterPassword: string);
+await sls.unlock(masterPassword: string); // no-op when uninitialized / password-less mode
 await sls.setMasterPassword(masterPassword: string);
 await sls.removeMasterPassword();
 await sls.rotateMasterPassword(oldMasterPassword: string, newMasterPassword: string);
 sls.lock();
 await sls.rotateKeys(); // password-less only
+sls.isUsingMasterPassword() // true / false
 
 // Data
 const data = await sls.getData<T extends Record<string, unknown>>();
@@ -133,11 +137,6 @@ bun run build
 * ESM output: `dist/esm/sls.browser.min.js`
 * CJS output: `dist/cjs/sls.browser.min.cjs`
 * Types: `dist/types/index.d.ts`
-
-### CI/CD
-
-Publishing from GitHub Actions when you push a `v*.*.*` tag.
-Add the repo secret **`NPM_TOKEN`** (automation token with `publish` rights).
 
 ---
 

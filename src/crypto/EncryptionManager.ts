@@ -43,20 +43,21 @@ export class EncryptionManager {
   async decryptData<T = unknown>(key: CryptoKey, ivB64: string, ctB64: string): Promise<T> {
     if (!ivB64 || !ctB64) throw new ValidationError("IV and ciphertext are required");
 
-    let iv: BufferSource;
+    let ivBytes: BufferSource;
     let ct: Uint8Array;
-    try {
-      iv = base64ToBytes(ivB64) as BufferSource;
-      ct = base64ToBytes(ctB64);
-    } catch (e) {
-      throw e;
+    
+    ivBytes = base64ToBytes(ivB64) as BufferSource;
+    ct = base64ToBytes(ctB64);
+    
+    if (ivBytes.byteLength !== SLS_CONSTANTS.AES.IV_LENGTH) {
+      throw new ValidationError(`IV must be ${SLS_CONSTANTS.AES.IV_LENGTH} bytes`);
     }
 
     let pt: ArrayBuffer;
     try {
-      pt = await crypto.subtle.decrypt({ name: SLS_CONSTANTS.AES.NAME, iv: iv }, key, toArrayBuffer(ct));
+      pt = await crypto.subtle.decrypt({ name: SLS_CONSTANTS.AES.NAME, iv: ivBytes }, key, toArrayBuffer(ct));
     } catch (e) {
-      throw new CryptoError(`Decryption failed: Invalid Data?`);
+      throw new CryptoError(`Invalid key or data.`);
     }
 
     try {
@@ -67,13 +68,15 @@ export class EncryptionManager {
   }
 
   async unwrapDek(ivWrapB64: string, wrappedB64: string, kek: CryptoKey, forWrapping = false): Promise<CryptoKey> {
-    let iv: BufferSource;
+    let ivBytes: BufferSource;
     let wrapped: Uint8Array;
-    try {
-      iv = base64ToBytes(ivWrapB64) as BufferSource; // may throw ValidationError
-      wrapped = base64ToBytes(wrappedB64);
-    } catch (e) {
-      throw e; // propagate ValidationError
+
+    ivBytes = base64ToBytes(ivWrapB64) as BufferSource; // may throw ValidationError
+    wrapped = base64ToBytes(wrappedB64);
+
+
+    if (ivBytes.byteLength !== SLS_CONSTANTS.AES.IV_LENGTH) {
+      throw new ValidationError(`Wrap IV must be ${SLS_CONSTANTS.AES.IV_LENGTH} bytes`);
     }
 
     try {
@@ -81,13 +84,13 @@ export class EncryptionManager {
         "raw",
         toArrayBuffer(wrapped),
         kek,
-        { name: SLS_CONSTANTS.AES.NAME, iv: iv },
+        { name: SLS_CONSTANTS.AES.NAME, iv: ivBytes },
         { name: SLS_CONSTANTS.AES.NAME, length: SLS_CONSTANTS.AES.LENGTH },
         forWrapping,
         forWrapping ? ["wrapKey", "unwrapKey", "encrypt", "decrypt"] : ["encrypt", "decrypt"]
       );
     } catch (e) {
-      throw new CryptoError("Key unwrapping failed. Invalid data?");
+      throw new CryptoError("Invalid key or data.");
     }
   }
 

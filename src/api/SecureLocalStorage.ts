@@ -8,6 +8,7 @@ import type { PersistedConfigV2 } from "../types";
 import { base64ToBytes } from "../utils/base64";
 import { toPlainJson } from "../utils/json";
 import { makeSecureDataView, SecureDataView } from "../utils/secureDataView";
+import type { IdbConfig } from "../crypto/DeviceKeyProvider";
 import {
   ExportError,
   ImportError,
@@ -20,11 +21,7 @@ export interface SecureLocalStorageOptions {
   /** Override the localStorage key (for multi-tenant apps or tests). */
   storageKey?: string;
   /** Override IndexedDB configuration (for multi-tenant apps or tests). */
-  idbConfig?: {
-    dbName?: string;
-    storeName?: string;
-    keyId?: string;
-  };
+  idbConfig?: Partial<IdbConfig>;
 }
 
 export class SecureLocalStorage {
@@ -57,11 +54,16 @@ export class SecureLocalStorage {
   }
 
 
-  /** Unlock session with master password (no-op in device mode). */
+  /** Unlock session with master password (no-op in device mode / no data available ). */
   async unlock(masterPassword: string): Promise<void> {
     await this.ready;
-    if (!this.config) throw new ImportError("No data to unlock");
+    if (!this.config) return;
     if (!this.isUsingMasterPassword()) return; // already unlocked in device mode
+    
+    if (typeof masterPassword !== "string" || masterPassword.length === 0) {
+      throw new ValidationError("masterPassword must be a non-empty string");
+    }
+
 
     const { salt, rounds } = this.config.header;
     const kek = await deriveKekFromPassword(masterPassword, base64ToBytes(salt), rounds);
@@ -199,7 +201,7 @@ export class SecureLocalStorage {
     const newDek = await this.enc.createDek();
     const { iv, ciphertext } = await this.enc.encryptData(newDek, plain);
 
-    const newDeviceKek = await DeviceKeyProvider.rotateKey();
+    const newDeviceKek = await DeviceKeyProvider.rotateKey(this.idbConfig);
     const { ivWrap, wrappedKey } = await this.enc.wrapDek(newDek, newDeviceKek);
 
     this.config!.header = {
@@ -241,6 +243,11 @@ export class SecureLocalStorage {
     await this.ready;
     this.requireConfig();
     await this.ensureDekLoaded();
+
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new ValidationError("Data must be a plain object");
+    }
+
     const plain = toPlainJson(value);
     const { iv, ciphertext } = await this.enc.encryptData(this.dek!, plain);
     this.config!.data = { iv, ciphertext };
@@ -264,6 +271,11 @@ export class SecureLocalStorage {
 
     if (!customExportPassword && !this.isUsingMasterPassword()) {
       throw new ExportError("Export password required in device mode");
+    }
+
+    if (customExportPassword !== undefined &&
+        (typeof customExportPassword !== "string" || customExportPassword.trim().length === 0)) {
+      throw new ExportError("Export password must be a non-empty string");
     }
 
     try {
@@ -317,15 +329,20 @@ export class SecureLocalStorage {
     }
 
     const isMasterProtected = bundle.header.mPw === true || (bundle.header.rounds > 1 && bundle.header.mPw !== false);
+
+
+    if (typeof password !== "string" || password.length === 0) {
+      throw new ImportError("Master password required to import");
+    }
+
     if (isMasterProtected) {
-      if (!password) throw new ImportError("Master password required to import");
-      // Validate master password by trying to unwrap
-      const kek = await deriveKekFromPassword(password, base64ToBytes(bundle.header.salt), bundle.header.rounds);
       try {
-        // test unwrap (non-extractable)
+        // early shape validation
+        this.validateBundle(bundle);
+        const kek = await deriveKekFromPassword(password, base64ToBytes(bundle.header.salt), bundle.header.rounds);
         await this.enc.unwrapDek(bundle.header.iv, bundle.header.wrappedKey, kek, false);
       } catch {
-        throw new ImportError("Invalid master password");
+        throw new ImportError("Invalid master password or corrupted export data");
       }
       // Accept bundle as-is (master mode)
       this.config = bundle;
@@ -335,9 +352,8 @@ export class SecureLocalStorage {
       return 'masterPassword';
     }
 
-    if (!password) throw new ImportError("Export password required to import");
-
     try {
+      this.validateBundle(bundle);
       const exportKek = await deriveKekFromPassword(password, base64ToBytes(bundle.header.salt), bundle.header.rounds);
       const extractableDek = await this.enc.unwrapDek(bundle.header.iv, bundle.header.wrappedKey, exportKek, true);
       const deviceKek = await DeviceKeyProvider.getKey(this.idbConfig);
@@ -370,7 +386,7 @@ export class SecureLocalStorage {
     this.session.clear();
     this.dek = null;
     this.store.clear();
-    await DeviceKeyProvider.deletePersistent();
+    await DeviceKeyProvider.deletePersistent(this.idbConfig);
     await this.initialize(true);
   }
 
@@ -479,5 +495,12 @@ export class SecureLocalStorage {
 
   private async unwrapDekWithKek(kek: CryptoKey, forWrapping: boolean): Promise<void> {
     this.dek = await this.enc.unwrapDek(this.config!.header.iv, this.config!.header.wrappedKey, kek, forWrapping);
+  }
+
+  private validateBundle(bundle: PersistedConfigV2) {
+    base64ToBytes(bundle.header.iv);
+    base64ToBytes(bundle.header.wrappedKey);
+    if (bundle.data.iv) base64ToBytes(bundle.data.iv);
+    if (bundle.data.ciphertext) base64ToBytes(bundle.data.ciphertext);
   }
 }

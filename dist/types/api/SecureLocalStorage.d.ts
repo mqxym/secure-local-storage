@@ -1,13 +1,10 @@
 import { SecureDataView } from "../utils/secureDataView";
+import type { IdbConfig } from "../crypto/DeviceKeyProvider";
 export interface SecureLocalStorageOptions {
     /** Override the localStorage key (for multi-tenant apps or tests). */
     storageKey?: string;
     /** Override IndexedDB configuration (for multi-tenant apps or tests). */
-    idbConfig?: {
-        dbName?: string;
-        storeName?: string;
-        keyId?: string;
-    };
+    idbConfig?: Partial<IdbConfig>;
 }
 export declare class SecureLocalStorage {
     private readonly store;
@@ -20,7 +17,7 @@ export declare class SecureLocalStorage {
     readonly DATA_VERSION: number;
     constructor(opts?: SecureLocalStorageOptions);
     isUsingMasterPassword(): boolean;
-    /** Unlock session with master password (no-op in device mode). */
+    /** Unlock session with master password (no-op in device mode / no data available ). */
     unlock(masterPassword: string): Promise<void>;
     /** Set a master password (switch from device mode to master mode). */
     setMasterPassword(masterPassword: string): Promise<void>;
@@ -58,4 +55,5 @@ export declare class SecureLocalStorage {
     private sessionKekOrThrow;
     private ensureDekLoaded;
     private unwrapDekWithKek;
+    private validateBundle;
 }
