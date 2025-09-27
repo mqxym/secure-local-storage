@@ -60,10 +60,9 @@ export class SecureLocalStorage {
     if (!this.config) return;
     if (!this.isUsingMasterPassword()) return; // already unlocked in device mode
     
-    if (typeof masterPassword !== "string" || masterPassword.length === 0) {
+    if (typeof masterPassword !== "string" || masterPassword.trim().length === 0) {
       throw new ValidationError("masterPassword must be a non-empty string");
     }
-
 
     const { salt, rounds } = this.config.header;
     const kek = await deriveKekFromPassword(masterPassword, base64ToBytes(salt), rounds);
@@ -232,7 +231,13 @@ export class SecureLocalStorage {
       return makeSecureDataView({} as T);
     }
     const obj = await this.enc.decryptData<unknown>(this.dek!, this.config!.data.iv, this.config!.data.ciphertext);
-    if (!obj || typeof obj !== "object" || Array.isArray(obj)) {
+    const isPlain =
+      !!obj &&
+      typeof obj === "object" &&
+      !Array.isArray(obj) &&
+      Object.getPrototypeOf(obj as object) === Object.prototype;
+
+    if (!isPlain) {
       throw new ValidationError("Stored data must be a plain object");
     }
     return makeSecureDataView(obj as T);
@@ -328,17 +333,21 @@ export class SecureLocalStorage {
       throw new ImportError(`Unsupported export version ${bundle.header.v}`);
     }
 
-    const isMasterProtected = bundle.header.mPw === true || (bundle.header.rounds > 1 && bundle.header.mPw !== false);
+    this.validateBundle(bundle);
 
+    const isMasterProtected =
+      bundle.header.mPw === true ||
+      (bundle.header.rounds > 1 && bundle.header.mPw !== false);
 
     if (typeof password !== "string" || password.length === 0) {
-      throw new ImportError("Master password required to import");
+      throw new ImportError(isMasterProtected
+        ? "Master password required to import"
+        : "Export password required to import"
+      );
     }
 
     if (isMasterProtected) {
       try {
-        // early shape validation
-        this.validateBundle(bundle);
         const kek = await deriveKekFromPassword(password, base64ToBytes(bundle.header.salt), bundle.header.rounds);
         await this.enc.unwrapDek(bundle.header.iv, bundle.header.wrappedKey, kek, false);
       } catch {
@@ -353,7 +362,6 @@ export class SecureLocalStorage {
     }
 
     try {
-      this.validateBundle(bundle);
       const exportKek = await deriveKekFromPassword(password, base64ToBytes(bundle.header.salt), bundle.header.rounds);
       const extractableDek = await this.enc.unwrapDek(bundle.header.iv, bundle.header.wrappedKey, exportKek, true);
       const deviceKek = await DeviceKeyProvider.getKey(this.idbConfig);
@@ -497,10 +505,44 @@ export class SecureLocalStorage {
     this.dek = await this.enc.unwrapDek(this.config!.header.iv, this.config!.header.wrappedKey, kek, forWrapping);
   }
 
-  private validateBundle(bundle: PersistedConfigV2) {
-    base64ToBytes(bundle.header.iv);
-    base64ToBytes(bundle.header.wrappedKey);
-    if (bundle.data.iv) base64ToBytes(bundle.data.iv);
-    if (bundle.data.ciphertext) base64ToBytes(bundle.data.ciphertext);
+  private validateBundle(bundle: PersistedConfigV2): void {
+    const h = bundle?.header as PersistedConfigV2["header"];
+    const d = bundle?.data as PersistedConfigV2["data"];
+    if (!h || !d) throw new ImportError("Invalid export structure");
+
+    // header types
+    if (typeof h.iv !== "string" || h.iv.length === 0) throw new ImportError("Invalid header.iv");
+    if (typeof h.wrappedKey !== "string" || h.wrappedKey.length === 0) throw new ImportError("Invalid header.wrappedKey");
+    if (!Number.isInteger(h.rounds) || h.rounds < 1) throw new ImportError("Invalid header.rounds");
+
+    // rounds/salt semantics
+    if (h.rounds === 1) {
+      if (h.salt !== "") throw new ImportError("Device-mode bundles must have empty salt");
+    } else {
+      if (typeof h.salt !== "string" || h.salt.length === 0) {
+        throw new ImportError("Password-protected bundles must include non-empty salt");
+      }
+    }
+
+    // optional marker type
+    if ("mPw" in h && typeof h.mPw !== "boolean") {
+      throw new ImportError("Invalid header.mPw");
+    }
+
+    // data types
+    if (typeof d.iv !== "string" || typeof d.ciphertext !== "string") {
+      throw new ImportError("Invalid data section");
+    }
+
+    // base64 validation for all relevant fields
+    try {
+      base64ToBytes(h.iv);
+      base64ToBytes(h.wrappedKey);
+      if (d.iv) base64ToBytes(d.iv);
+      if (d.ciphertext) base64ToBytes(d.ciphertext);
+    } catch (e) {
+      throw new ImportError("Invalid base64 data");
+    }
+
   }
 }

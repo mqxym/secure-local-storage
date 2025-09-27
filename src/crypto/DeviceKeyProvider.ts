@@ -138,20 +138,35 @@ export class DeviceKeyProvider {
    */
   static async deletePersistent(cfgIn?: Partial<IdbConfig>): Promise<void> {
     const cfg = resolveIdbConfig(cfgIn);
-    const mk = memKeyId(cfg);
-    this.memoryKeys.delete(mk);
+    this.memoryKeys.delete(memKeyId(cfg));
 
     if (!globalThis.indexedDB) return;
 
-    // Back-compat behavior: delete entire DB (as before)
-    await new Promise<void>((resolve, reject) => {
+    // Prefer surgical delete of only the targeted keyId.
+    const db = await this.openDB(cfg).catch(() => null);
+    if (db) {
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const tx = db.transaction(cfg.storeName, "readwrite");
+          const del = tx.objectStore(cfg.storeName).delete(cfg.keyId);
+          del.onsuccess = () => resolve();
+          del.onerror = () => reject(del.error);
+        });
+        db.close();
+        return;
+      } catch {
+        // fall through to full DB delete
+        db.close();
+      }
+    }
+
+    // Fallback: delete the whole DB 
+    await new Promise<void>((resolve) => {
       const req = indexedDB.deleteDatabase(cfg.dbName);
       req.onsuccess = () => resolve();
-      req.onerror = () => reject(req.error);
-    }).catch(() => {
-      // Swallow errors to match previous behavior
+      req.onerror = () => resolve(); 
     });
-  }
+}
 
   // --------------------------- private helpers ---------------------------
 

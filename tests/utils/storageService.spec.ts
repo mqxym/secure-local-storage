@@ -80,4 +80,46 @@ describe("StorageService - quota detection variants", () => {
       localStorage.removeItem(key);
     }
   });
+  it("wraps DOMException(name=NS_ERROR_DOM_QUOTA_REACHED) as StorageFullError", () => {
+    const key = "test:storage:quota:ns_error";
+    const s = new StorageService(key);
+    const cfg = {
+      header: { v: 2, salt: "", rounds: 1, iv: "iv", wrappedKey: "wk" },
+      data: { iv: "iv", ciphertext: "ct" }
+    };
+
+    const originalSetItem = localStorage.setItem;
+    class NSQuotaErr extends Error { constructor() { super("NS_ERROR_DOM_QUOTA_REACHED"); this.name = "NS_ERROR_DOM_QUOTA_REACHED"; } }
+    // @ts-ignore override
+    localStorage.setItem = () => { throw new NSQuotaErr(); };
+
+    try {
+      expect(() => s.set(cfg as any)).toThrow(StorageFullError);
+    } finally {
+      // @ts-ignore restore
+      localStorage.setItem = originalSetItem;
+      localStorage.removeItem(key);
+    }
+  });
+
+  it("wraps generic 'quota exceeded' messages as StorageFullError", () => {
+    const key = "test:storage:quota:message";
+    const s = new StorageService(key);
+    const cfg = {
+      header: { v: 2, salt: "", rounds: 1, iv: "iv", wrappedKey: "wk" },
+      data: { iv: "iv", ciphertext: "ct" }
+    };
+
+    const originalSetItem = localStorage.setItem;
+    // @ts-ignore override
+    localStorage.setItem = () => { throw new Error("The quota has been exceeded."); };
+
+    try {
+      expect(() => s.set(cfg as any)).toThrow(StorageFullError);
+    } finally {
+      // @ts-ignore restore
+      localStorage.setItem = originalSetItem;
+      localStorage.removeItem(key);
+    }
+  });
 });

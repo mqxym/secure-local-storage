@@ -1,7 +1,8 @@
 export function bytesToBase64(bytes: ArrayBuffer | Uint8Array): string {
   const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  if (u8.byteLength === 0) return "";
   let binary = "";
-  for (let i = 0; i < u8.length; i++) binary += String.fromCharCode(u8.at(i)!);
+  for (let i = 0; i < u8.length; i++) binary += String.fromCharCode(u8[i] as number);
   if (typeof btoa === "function") return btoa(binary);
   // @ts-ignore
   return Buffer.from(binary, "binary").toString("base64");

@@ -79,7 +79,7 @@ const sls = secureLocalStorage({
 await sls.unlock(masterPassword: string); // no-op when uninitialized / password-less mode
 await sls.setMasterPassword(masterPassword: string);
 await sls.removeMasterPassword();
-await sls.rotateMasterPassword(oldMasterPassword: string, newMasterPassword: string);
+await sls.rotateMasterPassword(oldMasterPassword: string, newMasterPassword: string); // switches to master password mode when in device key mode
 sls.lock();
 await sls.rotateKeys(); // password-less only
 sls.isUsingMasterPassword() // true / false

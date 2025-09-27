@@ -21,10 +21,17 @@ export class StorageService {
 
   _isQuotaExceeded(err: unknown): boolean {
     const e = err as { name?: string; code?: number; message?: string };
-    return e?.name === "QuotaExceededError" ||
-          e?.name === "NS_ERROR_DOM_QUOTA_REACHED" ||
-          typeof e?.message === "string" && /quota/i.test(e.message) ||
-          e?.code === 22 || e?.code === 1014; // Safari/Firefox DOMException codes
+    const name = e?.name ?? "";
+    const msg = e?.message ?? "";
+    const code = e?.code;
+
+    return (
+      name === "QuotaExceededError" ||
+      name === "NS_ERROR_DOM_QUOTA_REACHED" ||
+      code === 22 ||            // legacy Safari / WebKit
+      code === 1014 ||          // Firefox DOMException
+      /quota/i.test(msg)        // generic safety net
+    );
   }
 
   set(cfg: PersistedConfigV2): void {
