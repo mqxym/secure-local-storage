@@ -207,15 +207,26 @@
       lastView: null
     };
 
-    function showAlert(kind, msg) {
-      const el = document.createElement("div");
-      el.className = `alert alert-${kind} alert-dismissible fade show`;
-      el.role = "alert";
-      el.innerHTML = `<div>${msg}</div><button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>`;
-      alertHost.appendChild(el);
-      setTimeout(() => el.classList.add("show"), 10);
-      setTimeout(() => el.remove(), 8000);
-    }
+  function showAlert(kind, msg) {
+    const el = document.createElement("div");
+    el.className = `alert alert-${kind} alert-dismissible fade show`;
+    el.role = "alert";
+
+    const msgDiv = document.createElement("div");
+    msgDiv.textContent = String(msg ?? "");  // safe text rendering
+
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "btn-close";
+    closeBtn.setAttribute("data-bs-dismiss", "alert");
+    closeBtn.setAttribute("aria-label", "Close");
+
+    el.append(msgDiv, closeBtn);
+    alertHost.appendChild(el);
+
+    setTimeout(() => el.classList.add("show"), 10);
+    setTimeout(() => el.remove(), 8000);
+  }
 
     function log(msg) {
       const time = new Date().toLocaleTimeString();

@@ -27,6 +27,8 @@ jobs:
         uses: github/codeql-action/analyze@v3
 
   test-build:
+    permissions:
+      contents: read
     name: Build & Test
     runs-on: ubuntu-latest
     steps:
