@@ -22,7 +22,7 @@ export { SecureLocalStorage } from "./api/SecureLocalStorage";
  *   await sls.setData({ secret: 'This is a secret' });
  *   const data = await sls.getData();
  *   console.log(data.value.secret); // "This is a secret"
- *   data.wipe();
+ *   data.clear(); // clears read data memory
  * }
  *
  * main();

@@ -63,7 +63,7 @@ export interface SecureLocalStorageOptions {
  * console.log(dataView.value.mySecret); // "hello world"
  *
  * // Wipe the plaintext from memory
- * dataView.wipe();
+ * dataView.clear();
  * ```
  *
  * @example
