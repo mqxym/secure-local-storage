@@ -45,7 +45,7 @@ export interface SecureLocalStorageOptions {
  * console.log(dataView.value.mySecret); // "hello world"
  *
  * // Wipe the plaintext from memory
- * dataView.wipe();
+ * dataView.clear();
  * ```
  *
  * @example
@@ -89,6 +89,12 @@ export declare class SecureLocalStorage {
      * @returns `true` if a master password is set, `false` otherwise.
      */
     isUsingMasterPassword(): boolean;
+    /**
+     * Checks if the storage is currently locked.
+     * This is only relevant when in master password mode.
+     * @returns `true` if in master password mode and no dek or session, otherwise `false`.
+     */
+    isLocked(): boolean;
     /**
      * Unlocks the data encryption key (DEK) using the provided master password.
      * This is required to access data when in master password mode.
