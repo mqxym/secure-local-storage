@@ -123,6 +123,15 @@ export class SecureLocalStorage {
     return (this.config?.header.rounds ?? 1) > 1;
   }
 
+  /**
+   * Checks if the storage is currently locked.
+   * This is only relevant when in master password mode.
+   * @returns `true` if in master password mode and no dek or session, otherwise `false`.
+   */
+  public isLocked(): boolean {
+    return this.isUsingMasterPassword() && !this.dek;
+  }
+
 
   /**
    * Unlocks the data encryption key (DEK) using the provided master password.
