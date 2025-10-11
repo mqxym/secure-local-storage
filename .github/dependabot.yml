@@ -10,6 +10,7 @@ updates:
       prefix: "chore(bun)"
     assignees:
       - "mqxym"
+    target-branch: "mqxym/dev"
 
   - package-ecosystem: "github-actions"
     directory: "/"               
@@ -21,4 +22,5 @@ updates:
       prefix: "chore(ci)"
     assignees:
       - "mqxym"
+    target-branch: "mqxym/dev"
 
