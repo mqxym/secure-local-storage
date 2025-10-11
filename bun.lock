@@ -7,12 +7,12 @@
         "argon2-browser": "^1.18.0",
       },
       "devDependencies": {
-        "@types/bun": "^1.2.22",
+        "@types/bun": "^1.2.23",
         "@types/jest": "^30.0.0",
-        "@types/node": "^24.5.2",
-        "bun-types": "^1.2.22",
+        "@types/node": "^24.6.2",
+        "bun-types": "^1.2.23",
         "fake-indexeddb": "^6.2.2",
-        "typescript": "^5.5.4",
+        "typescript": "^5.9.3",
       },
     },
   },
@@ -77,7 +77,7 @@
 
     "expect": ["expect@30.1.2", "", { "dependencies": { "@jest/expect-utils": "30.1.2", "@jest/get-type": "30.1.0", "jest-matcher-utils": "30.1.2", "jest-message-util": "30.1.0", "jest-mock": "30.0.5", "jest-util": "30.0.5" } }, "sha512-xvHszRavo28ejws8FpemjhwswGj4w/BetHIL8cU49u4sGyXDw2+p3YbeDbj6xzlxi6kWTjIRSTJ+9sNXPnF0Zg=="],
 
-    "fake-indexeddb": ["fake-indexeddb@6.2.2", "", {}, "sha512-SGbf7fzjeHz3+12NO1dYigcYn4ivviaeULV5yY5rdGihBvvgwMds4r4UBbNIUMwkze57KTDm32rq3j1Az8mzEw=="],
+    "fake-indexeddb": ["fake-indexeddb@6.2.3", "", {}, "sha512-idzJXFtDIHNShFZ9ssS8IdsRgAP0t9zwWvSdCKsWK2dgh2xcXA6/2Oteaxar5GJqmwzZXCrKRO6F5IEiR4yJzw=="],
 
     "fill-range": ["fill-range@7.1.1", "", { "dependencies": { "to-regex-range": "^5.0.1" } }, "sha512-YsGpe3WHLK8ZYi4tWDg2Jy3ebRz2rXowDxnld4bkQB00cc/1Zw9AWnC0i9ztDJitivtQvaI9KaLyKrc+hBW0yg=="],
 
