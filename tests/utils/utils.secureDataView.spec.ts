@@ -22,3 +22,23 @@ describe("SecureDataView edge cases", () => {
     expect(() => ("a" in view)).toThrow(LockedError);
   });
 });
+
+import "../setup";
+
+describe("SecureDataView - descriptor details", () => {
+  it("clear is enumerable and descriptors reflect read-only semantics", async () => {
+    const sls = secureLocalStorage({ storageKey: "test:view:desc" });
+    await sls.setData({ a: 1 });
+
+    const view = await sls.getData<{ a: number }>();
+    const descClear = Object.getOwnPropertyDescriptor(view, "clear");
+    expect(descClear?.enumerable).toBe(true);
+    expect(descClear?.writable).toBe(false);
+
+    // defineProperty should not be allowed
+    expect(() => Object.defineProperty(view, "a", { value: 2 })).toThrow();
+
+    view.clear();
+    expect(() => Object.getOwnPropertyDescriptor(view, "a")).toThrow(LockedError);
+  });
+});

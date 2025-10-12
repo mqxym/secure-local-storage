@@ -1,6 +1,6 @@
 import "./../setup";
 import { StorageService } from "../../src/storage/StorageService";
-import { StorageFullError } from "../../src/errors";
+import { PersistenceError, StorageFullError } from "../../src/errors";
 
 describe("StorageService", () => {
   it("get() returns null on invalid JSON", () => {
@@ -119,6 +119,62 @@ describe("StorageService - quota detection variants", () => {
     } finally {
       // @ts-ignore restore
       localStorage.setItem = originalSetItem;
+      localStorage.removeItem(key);
+    }
+  });
+});
+
+describe("StorageService - integrity & quota variants", () => {
+  it("throws when post-write readback differs (integrity check)", () => {
+    const key = "test:storage:integrity";
+    const svc = new StorageService(key);
+    const cfg = {
+      header: { v: 2, salt: "", rounds: 1, iv: "aXY", wrappedKey: "d2s" },
+      data: { iv: "aXY", ciphertext: "Y3Q" }
+    } as unknown as any;
+
+    const originalSetItem = localStorage.setItem;
+    const originalGetItem = localStorage.getItem;
+
+    // Let setItem succeed but corrupt the readback
+    // @ts-ignore
+    localStorage.setItem = (...args: unknown[]) => originalSetItem.apply(localStorage, args);
+    // @ts-ignore
+    localStorage.getItem = (_k: string) => "__tampered__";
+
+    try {
+      expect(() => svc.set(cfg)).toThrow(PersistenceError);
+    } finally {
+      // @ts-ignore
+      localStorage.setItem = originalSetItem;
+      // @ts-ignore
+      localStorage.getItem = originalGetItem;
+      localStorage.removeItem(key);
+    }
+  });
+
+  it("quota detection considers Firefox DOMException code 1014", () => {
+    const key = "test:storage:quota:1014";
+    const svc = new StorageService(key);
+    const cfg = {
+      header: { v: 2, salt: "", rounds: 1, iv: "aXY", wrappedKey: "d2s" },
+      data: { iv: "aXY", ciphertext: "Y3Q" }
+    } as unknown as any;
+
+    const original = localStorage.setItem;
+    // @ts-ignore simulate Firefox code 1014
+    localStorage.setItem = () => {
+      const e = new Error("NS_ERROR_DOM_QUOTA_REACHED");
+      // @ts-ignore
+      e.code = 1014;
+      throw e;
+    };
+
+    try {
+      expect(() => svc.set(cfg)).toThrow(StorageFullError);
+    } finally {
+      // @ts-ignore
+      localStorage.setItem = original;
       localStorage.removeItem(key);
     }
   });

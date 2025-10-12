@@ -1,6 +1,6 @@
 import { SLS_CONSTANTS } from "../constants";
 import { PersistedConfigV2 } from "../types";
-import { StorageFullError } from "../errors";
+import { StorageFullError, PersistenceError } from "../errors";
 
 function estimateBytes(s: string): number {
   try { return new Blob([s]).size; } catch { return s.length; }
@@ -45,7 +45,7 @@ export class StorageService {
         throw new StorageFullError(`localStorage quota exceeded (${estimateBytes(serialized)} bytes)`);
       }
       const msg = (e as Error)?.message ?? String(e);
-      throw new StorageFullError(`Failed to persist data: ${msg}`);
+      throw new PersistenceError(`Failed to persist data: ${msg}`);
     }
   }
 

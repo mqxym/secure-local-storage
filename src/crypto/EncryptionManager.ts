@@ -30,6 +30,7 @@ export class EncryptionManager {
 
   async encryptData(key: CryptoKey, obj: unknown): Promise<{ iv: string; ciphertext: string }> {
     try {
+      this.assertKey(key, ["encrypt"], "encryptData()");
       const iv = new Uint8Array(SLS_CONSTANTS.AES.IV_LENGTH);
       crypto.getRandomValues(iv);
       const data = new TextEncoder().encode(JSON.stringify(obj));
@@ -52,6 +53,8 @@ export class EncryptionManager {
     if (ivBytes.byteLength !== SLS_CONSTANTS.AES.IV_LENGTH) {
       throw new ValidationError(`IV must be ${SLS_CONSTANTS.AES.IV_LENGTH} bytes`);
     }
+
+    this.assertKey(key, ["decrypt"], "decryptData()");
 
     let pt: ArrayBuffer;
     try {
@@ -80,6 +83,7 @@ export class EncryptionManager {
     }
 
     try {
+      this.assertKey(kek, ["unwrapKey"], "unwrapDek()");
       return await crypto.subtle.unwrapKey(
         "raw",
         toArrayBuffer(wrapped),
@@ -96,6 +100,7 @@ export class EncryptionManager {
 
   async wrapDek(dek: CryptoKey, kek: CryptoKey): Promise<{ ivWrap: string; wrappedKey: string }> {
     try {
+      this.assertKey(kek, ["wrapKey"], "wrapDek()");
       const iv = new Uint8Array(SLS_CONSTANTS.AES.IV_LENGTH);
       crypto.getRandomValues(iv);
       const wrapped = await crypto.subtle.wrapKey("raw", dek, kek, { name: SLS_CONSTANTS.AES.NAME, iv });
@@ -104,4 +109,15 @@ export class EncryptionManager {
       throw new CryptoError(`wrapKey failed: ${(e as Error)?.message ?? e}`);
     }
   }
+
+  private assertKey(key: CryptoKey, required: KeyUsage[], where: string): void {
+    if (!key || (key.algorithm as { name?: string })?.name !== SLS_CONSTANTS.AES.NAME) {
+      throw new ValidationError(`Invalid key algorithm for ${where}; expected ${SLS_CONSTANTS.AES.NAME}`);
+    }
+    for (const u of required) {
+      if (!key.usages.includes(u)) {
+        throw new ValidationError(`Key missing "${u}" usage for ${where}`);
+      }
+    }
+  } 
 }

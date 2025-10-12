@@ -1,6 +1,6 @@
 {
   "name": "@mqxym/secure-local-storage",
-  "version": "0.6.3",
+  "version": "0.6.4",
   "description": "Secure arbitrary objects in localStorage using AES-GCM envelope encryption with device-bound KEK (IndexedDB) or Argon2id-derived KEK (master password).",
   "license": "MIT",
   "author": "mqxym",

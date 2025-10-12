@@ -88,6 +88,9 @@ export class SecureLocalStorage {
   private dek: CryptoKey | null = null;
   private ready: Promise<void>;
   private readonly idbConfig: { dbName: string; storeName: string; keyId: string };
+
+  private lastResetReason: "invalid-config" | "device-kek-mismatch" | null = null;
+
   /**
    * The current version of the data structure format.
    */
@@ -175,7 +178,8 @@ export class SecureLocalStorage {
     if (this.isUsingMasterPassword()) {
       throw new ModeError("Master password already set; use rotateMasterPassword()");
     }
-    if (typeof masterPassword !== "string" || masterPassword.length === 0) {
+    const pw = typeof masterPassword === "string" ? masterPassword.trim() : "";
+    if (pw.length === 0) {
       throw new ValidationError("masterPassword must be a non-empty string");
     }
     // Unwrap existing DEK for wrapping using device KEK
@@ -247,7 +251,8 @@ export class SecureLocalStorage {
     await this.ready;
     this.requireConfig();
 
-    if (typeof newMasterPassword !== "string" || newMasterPassword.length === 0) {
+    const newPw = typeof newMasterPassword === "string" ? newMasterPassword.trim() : "";
+    if (newPw.length === 0) {
       throw new ValidationError("newMasterPassword must be a non-empty string");
     }
 
@@ -403,7 +408,7 @@ export class SecureLocalStorage {
    *     in device-bound mode.
    *
    * @param customExportPassword - An optional password to protect the exported data.
-   *        Required if not in master password mode.
+   *        Required if not in master password mode (password is trimmed).
    * @returns A JSON string representing the encrypted data bundle.
    * @throws {ExportError} If a password is required but not provided, or if the
    *         provided password is invalid.
@@ -475,12 +480,16 @@ export class SecureLocalStorage {
    */
   async importData(serialized: string, password?: string): Promise<string> {
     await this.ready;
-    let bundle: PersistedConfigV2;
-    try {
-      bundle = JSON.parse(serialized) as PersistedConfigV2;
+    let t: unknown;
+    try {  
+      t = JSON.parse(serialized);
     } catch {
-      throw new ImportError("Invalid import JSON");
+      throw new ImportError("Invalid export structure");
     }
+    if (!t || typeof t !== "object" || typeof (t as any).header !== "object" || typeof (t as any).data !== "object") {
+      throw new ImportError("Invalid export structure");
+    }
+    const bundle = t as PersistedConfigV2;
 
     if (bundle.header.v !== SLS_CONSTANTS.CURRENT_DATA_VERSION) {
       throw new ImportError(`Unsupported export version ${bundle.header.v}`);
@@ -503,6 +512,11 @@ export class SecureLocalStorage {
       try {
         const kek = await deriveKekFromPassword(password, base64ToBytes(bundle.header.salt), bundle.header.rounds);
         await this.enc.unwrapDek(bundle.header.iv, bundle.header.wrappedKey, kek, false);
+        const dek = await this.enc.unwrapDek(bundle.header.iv, bundle.header.wrappedKey, kek, false);
+        if (bundle.data.iv && bundle.data.ciphertext) {
+          await this.enc.decryptData<Record<string, unknown>>(dek, bundle.data.iv, bundle.data.ciphertext);
+        }
+
       } catch {
         throw new ImportError("Invalid master password or corrupted export data");
       }
@@ -610,6 +624,7 @@ export class SecureLocalStorage {
 
     const existing = this.store.get();
     if (!isValidConfig(existing)) {
+      this.lastResetReason = "invalid-config";
       await this.initialize(true);
       return;
     }
@@ -624,6 +639,7 @@ export class SecureLocalStorage {
       } catch {
         // throw new ValidationError("Failed to unwrap DEK using device key. Tampered data?");
         // Cannot unwrap with current device KEK -> start fresh
+        this.lastResetReason = "device-kek-mismatch";
         await this.initialize(true);
       }
     }

@@ -18,8 +18,8 @@ export async function deriveKekFromPassword(
     throw new ValidationError("Password must be a non-empty string");
   }
   
-  if (!(salt instanceof Uint8Array) || salt.byteLength < SLS_CONSTANTS.SALT_LEN) {
-    throw new ValidationError(`Salt must be Uint8Array with length >= ${SLS_CONSTANTS.SALT_LEN}`);
+  if (!(salt instanceof Uint8Array) || salt.byteLength !== SLS_CONSTANTS.SALT_LEN) {
+    throw new ValidationError(`Salt must be Uint8Array of length ${SLS_CONSTANTS.SALT_LEN}`);
   }
 
   const MAX_ITERATIONS = 64;
