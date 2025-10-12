@@ -1,9 +1,9 @@
-import { PersistedConfigV2 } from "../types";
+import { type PersistedConfig } from "../types";
 export declare class StorageService {
     private key;
     constructor(key?: string);
-    get(): PersistedConfigV2 | null;
+    get(): PersistedConfig | null;
     _isQuotaExceeded(err: unknown): boolean;
-    set(cfg: PersistedConfigV2): void;
+    set(cfg: PersistedConfig): void;
     clear(): void;
 }

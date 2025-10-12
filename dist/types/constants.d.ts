@@ -1,5 +1,7 @@
 export declare const SLS_CONSTANTS: {
     CURRENT_DATA_VERSION: 2;
+    MIGRATION_TARGET_VERSION: 3;
+    SUPPORTED_VERSIONS: readonly [2, 3];
     AES: {
         NAME: "AES-GCM";
         LENGTH: 256;

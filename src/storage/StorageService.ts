@@ -1,5 +1,5 @@
 import { SLS_CONSTANTS } from "../constants";
-import { PersistedConfigV2 } from "../types";
+import { type PersistedConfig } from "../types";
 import { StorageFullError, PersistenceError } from "../errors";
 
 function estimateBytes(s: string): number {
@@ -13,10 +13,10 @@ export class StorageService {
     this.key = key;
   }
 
-  get(): PersistedConfigV2 | null {
+  get(): PersistedConfig | null {
     const raw = localStorage.getItem(this.key);
     if (!raw) return null;
-    try { return JSON.parse(raw) as PersistedConfigV2; } catch { return null; }
+    try { return JSON.parse(raw) as PersistedConfig; } catch { return null; }
   }
 
   _isQuotaExceeded(err: unknown): boolean {
@@ -34,7 +34,7 @@ export class StorageService {
     );
   }
 
-  set(cfg: PersistedConfigV2): void {
+  set(cfg: PersistedConfig): void {
     const serialized = JSON.stringify(cfg);
     try {
       localStorage.setItem(this.key, serialized);

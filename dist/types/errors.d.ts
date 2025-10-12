@@ -25,3 +25,6 @@ export declare class ExportError extends SlsError {
 export declare class NotSupportedError extends SlsError {
     constructor(message: string);
 }
+export declare class PersistenceError extends SlsError {
+    constructor(message: string);
+}
