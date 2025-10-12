@@ -16,6 +16,7 @@ import {
   ModeError,
   ValidationError
 } from "../errors";
+import { VersionManager } from "./sls/VersionManager";
 
 /**
  * Configuration options for initializing SecureLocalStorage.
@@ -25,6 +26,16 @@ export interface SecureLocalStorageOptions {
   idbConfig?: Partial<IdbConfig>;
 }
 
+/**
+ * Provides a secure local storage solution for web applications, encrypting data at rest.
+ *
+ * It supports two main modes of operation:
+ * - **Device-bound:** Data is encrypted with a key stored in the browser's IndexedDB.
+ *   This is the default mode and requires no user-provided password.
+ * - **Password-protected:** Data is encrypted with a key derived from a user-provided master password.
+ *
+ * The class handles key management, encryption, decryption, and data migration between versions.
+ */
 export class SecureLocalStorage {
   private readonly store: StorageService;
   private readonly enc = new EncryptionManager();
@@ -34,6 +45,7 @@ export class SecureLocalStorage {
   private ready: Promise<void>;
   private readonly idbConfig: { dbName: string; storeName: string; keyId: string };
   private readonly storageKeyStr: string;
+  private readonly versionManager: VersionManager;
 
   private lastResetReason: "invalid-config" | "device-kek-mismatch" | null = null;
 
@@ -48,19 +60,37 @@ export class SecureLocalStorage {
       storeName: opts?.idbConfig?.storeName ?? SLS_CONSTANTS.IDB.STORE,
       keyId: opts?.idbConfig?.keyId ?? SLS_CONSTANTS.IDB.ID,
     };
+    this.versionManager = new VersionManager(this.storageKeyStr, this.idbConfig, this.enc);
     this.ready = this.initialize();
   }
 
   // --------------------------- public API ---------------------------
 
+  /**
+   * Checks if the store is protected by a master password.
+   *
+   * @returns `true` if a master password is set, `false` otherwise.
+   */
   public isUsingMasterPassword(): boolean {
     return (this.config?.header.rounds ?? 1) > 1;
   }
 
+  /**
+   * Checks if the store is currently locked.
+   * This is only relevant when a master password is used.
+   *
+   * @returns `true` if the store is locked, `false` otherwise.
+   */
   public isLocked(): boolean {
     return this.isUsingMasterPassword() && !this.dek;
   }
 
+  /**
+   * Unlocks the store with the provided master password.
+   *
+   * @param masterPassword - The master password to unlock the store.
+   * @throws {ValidationError} If the master password is empty or invalid.
+   */
   async unlock(masterPassword: string): Promise<void> {
     await this.ready;
     if (!this.config) return;
@@ -76,18 +106,25 @@ export class SecureLocalStorage {
     // Unwrap using the correct AAD for current version/ctx
     try {
       this.session.set(kek, salt, rounds);
-      await this.unwrapDekWithKek(kek, false, this.wrapAadFor(this.config));
+      await this.unwrapDekWithKek(kek, false, this.versionManager.getAadFor("wrap", this.config));
     } catch {
       this.session.clear();
       throw new ValidationError("Invalid master password");
     }
 
     // Auto-migrate v2 -> v3 on unlock (master mode)
-    if (this.isV2(this.config)) {
+    if (this.versionManager.isV2(this.config)) {
       await this.migrateV2ToV3("master", this.config, kek);
     }
   }
 
+  /**
+   * Sets a new master password, transitioning the store from device-bound to password-protected mode.
+   *
+   * @param masterPassword The password to set. Must be a non-empty string.
+   * @throws {ModeError} If a master password is already set.
+   * @throws {ValidationError} If the master password is empty.
+   */
   async setMasterPassword(masterPassword: string): Promise<void> {
     await this.ready;
     this.requireConfig();
@@ -101,7 +138,7 @@ export class SecureLocalStorage {
 
     // Unwrap existing DEK (device mode, so use device key + current AAD)
     const deviceKek = await DeviceKeyProvider.getKey(this.idbConfig);
-    await this.unwrapDekWithKek(deviceKek, true, this.wrapAadFor(this.config!));
+    await this.unwrapDekWithKek(deviceKek, true, this.versionManager.getAadFor("wrap", this.config!));
 
     // Decrypt existing data using its current AAD (v2 has none)
     const plain = await this.decryptCurrentData();
@@ -113,11 +150,11 @@ export class SecureLocalStorage {
 
     // Rewrap with v3 store AAD
     const ctx: PersistedConfigV3["header"]["ctx"] = "store";
-    const wrapAad = this.buildWrapAad(ctx, SLS_CONSTANTS.MIGRATION_TARGET_VERSION);
+    const wrapAad = this.versionManager.buildWrapAad(ctx, SLS_CONSTANTS.MIGRATION_TARGET_VERSION);
     const wrapped = await this.enc.wrapDek(this.dek!, kek, wrapAad);
 
     // Encrypt data under v3 store AAD bound to new header
-    const dataAad = this.buildDataAad(ctx, SLS_CONSTANTS.MIGRATION_TARGET_VERSION, wrapped.ivWrap, wrapped.wrappedKey);
+    const dataAad = this.versionManager.buildDataAad(ctx, SLS_CONSTANTS.MIGRATION_TARGET_VERSION, wrapped.ivWrap, wrapped.wrappedKey);
     const { iv, ciphertext } = await this.enc.encryptData(this.dek!, plain, dataAad);
 
     this.config = {
@@ -138,6 +175,12 @@ export class SecureLocalStorage {
     this.persist();
   }
 
+  /**
+   * Removes the master password, transitioning the store to device-bound mode.
+   *
+   * @throws {ModeError} If no master password is set.
+   * @throws {LockedError} If the store is locked.
+   */
   async removeMasterPassword(): Promise<void> {
     await this.ready;
     this.requireConfig();
@@ -145,7 +188,7 @@ export class SecureLocalStorage {
     this.requireUnlocked();
 
     // Unwrap DEK for wrapping
-    await this.unwrapDekWithKek(this.sessionKekOrThrow(), true, this.wrapAadFor(this.config!));
+    await this.unwrapDekWithKek(this.sessionKekOrThrow(), true, this.versionManager.getAadFor("wrap", this.config!));
 
     // Decrypt data under current AAD
     const plain = await this.decryptCurrentData();
@@ -154,11 +197,11 @@ export class SecureLocalStorage {
 
     // Wrap with device kek under v3 store AAD
     const ctx: PersistedConfigV3["header"]["ctx"] = "store";
-    const wrapAad = this.buildWrapAad(ctx, SLS_CONSTANTS.MIGRATION_TARGET_VERSION);
+    const wrapAad = this.versionManager.buildWrapAad(ctx, SLS_CONSTANTS.MIGRATION_TARGET_VERSION);
     const { ivWrap, wrappedKey } = await this.enc.wrapDek(this.dek!, deviceKek, wrapAad);
 
     // Encrypt data with v3 data AAD bound to new header
-    const dataAad = this.buildDataAad(ctx, SLS_CONSTANTS.MIGRATION_TARGET_VERSION, ivWrap, wrappedKey);
+    const dataAad = this.versionManager.buildDataAad(ctx, SLS_CONSTANTS.MIGRATION_TARGET_VERSION, ivWrap, wrappedKey);
     const { iv, ciphertext } = await this.enc.encryptData(this.dek!, plain, dataAad);
 
     this.config = {
@@ -179,6 +222,14 @@ export class SecureLocalStorage {
     this.persist();
   }
 
+  /**
+   * Rotates the master password.
+   *
+   * @param oldMasterPassword The current master password.
+   * @param newMasterPassword The new master password to set.
+   * @throws {ValidationError} If the new master password is empty.
+   * @throws {LockedError} If the old master password is incorrect.
+   */
   async rotateMasterPassword(oldMasterPassword: string, newMasterPassword: string): Promise<void> {
     await this.ready;
     this.requireConfig();
@@ -198,7 +249,7 @@ export class SecureLocalStorage {
     this.requireUnlocked();
 
     // Unwrap DEK for wrapping and decrypt current data
-    await this.unwrapDekWithKek(this.sessionKekOrThrow(), true, this.wrapAadFor(this.config!));
+    await this.unwrapDekWithKek(this.sessionKekOrThrow(), true, this.versionManager.getAadFor("wrap", this.config!));
     const plain = await this.decryptCurrentData();
 
     // Build new KEK
@@ -208,11 +259,11 @@ export class SecureLocalStorage {
 
     // Rewrap with v3 store AAD
     const ctx: PersistedConfigV3["header"]["ctx"] = "store";
-    const wrapAad = this.buildWrapAad(ctx, SLS_CONSTANTS.MIGRATION_TARGET_VERSION);
+    const wrapAad = this.versionManager.buildWrapAad(ctx, SLS_CONSTANTS.MIGRATION_TARGET_VERSION);
     const { ivWrap, wrappedKey } = await this.enc.wrapDek(this.dek!, newKek, wrapAad);
 
     // Re-encrypt data bound to new header
-    const dataAad = this.buildDataAad(ctx, SLS_CONSTANTS.MIGRATION_TARGET_VERSION, ivWrap, wrappedKey);
+    const dataAad = this.versionManager.buildDataAad(ctx, SLS_CONSTANTS.MIGRATION_TARGET_VERSION, ivWrap, wrappedKey);
     const { iv, ciphertext } = await this.enc.encryptData(this.dek!, plain, dataAad);
 
     this.config = {
@@ -233,11 +284,21 @@ export class SecureLocalStorage {
     this.persist();
   }
 
+  /**
+   * Locks the store, requiring `unlock()` to be called before further operations.
+   * This is only effective in password-protected mode.
+   */
   lock(): void {
     this.session.clear();
     this.dek = null;
   }
 
+  /**
+   * Rotates the underlying device key, re-encrypting all data.
+   * This is only available in device-bound mode.
+   *
+   * @throws {ModeError} If a master password is set.
+   */
   async rotateKeys(): Promise<void> {
     await this.ready;
     this.requireConfig();
@@ -247,7 +308,7 @@ export class SecureLocalStorage {
     const deviceKek = await DeviceKeyProvider.getKey(this.idbConfig);
 
     // Ensure DEK loaded and decrypt data under current AAD
-    await this.unwrapDekWithKek(deviceKek, false, this.wrapAadFor(this.config!));
+    await this.unwrapDekWithKek(deviceKek, false, this.versionManager.getAadFor("wrap", this.config!));
     const plain = await this.decryptCurrentData();
 
     // Generate new DEK and new device KEK, re-encrypt data
@@ -256,11 +317,11 @@ export class SecureLocalStorage {
     // Wrap with rotated device kek under v3 store AAD
     const newDeviceKek = await DeviceKeyProvider.rotateKey(this.idbConfig);
     const ctx: PersistedConfigV3["header"]["ctx"] = "store";
-    const wrapAad = this.buildWrapAad(ctx, SLS_CONSTANTS.MIGRATION_TARGET_VERSION);
+    const wrapAad = this.versionManager.buildWrapAad(ctx, SLS_CONSTANTS.MIGRATION_TARGET_VERSION);
     const { ivWrap, wrappedKey } = await this.enc.wrapDek(newDek, newDeviceKek, wrapAad);
 
     // Encrypt with v3 data AAD bound to new header
-    const dataAad = this.buildDataAad(ctx, SLS_CONSTANTS.MIGRATION_TARGET_VERSION, ivWrap, wrappedKey);
+    const dataAad = this.versionManager.buildDataAad(ctx, SLS_CONSTANTS.MIGRATION_TARGET_VERSION, ivWrap, wrappedKey);
     const { iv, ciphertext } = await this.enc.encryptData(newDek, plain, dataAad);
 
     this.config = {
@@ -284,6 +345,14 @@ export class SecureLocalStorage {
     this.persist();
   }
 
+  /**
+   * Retrieves the stored data.
+   *
+   * @returns A promise that resolves with a `SecureDataView` of the stored data.
+   *          The view is a read-only proxy of the decrypted data.
+   * @throws {LockedError} If the store is locked.
+   * @throws {ValidationError} If the decrypted data is not a plain object.
+   */
   async getData<T extends Record<string, unknown> = Record<string, unknown>>(): Promise<SecureDataView<T>> {
     await this.ready;
     this.requireConfig();
@@ -292,7 +361,7 @@ export class SecureLocalStorage {
       return makeSecureDataView({} as T);
     }
 
-    const dataAad = this.dataAadFor(this.config);
+    const dataAad = this.versionManager.getAadFor("data", this.config);
     const obj = await this.enc.decryptData<unknown>(this.dek!, this.config!.data.iv, this.config!.data.ciphertext, dataAad);
 
     const isPlain =
@@ -307,6 +376,13 @@ export class SecureLocalStorage {
     return makeSecureDataView(obj as T);
   }
 
+  /**
+   * Saves data to the store. The value must be a plain object.
+   *
+   * @param value The plain object to save.
+   * @throws {LockedError} If the store is locked.
+   * @throws {ValidationError} If the value is not a plain object.
+   */
   async setData<T extends Record<string, unknown>>(value: T): Promise<void> {
     await this.ready;
     this.requireConfig();
@@ -317,12 +393,21 @@ export class SecureLocalStorage {
     }
 
     const plain = toPlainJson(value);
-    const dataAad = this.dataAadFor(this.config);
+    const dataAad = this.versionManager.getAadFor("data", this.config);
     const { iv, ciphertext } = await this.enc.encryptData(this.dek!, plain, dataAad);
     this.config!.data = { iv, ciphertext };
     this.persist();
   }
 
+  /**
+   * Exports the stored data as a serialized, protected string.
+   *
+   * @param customExportPassword An optional password to encrypt the exported data.
+   *                             If not provided in master password mode, the master password is used.
+   *                             Required in device-bound mode.
+   * @returns A promise that resolves with the serialized data bundle.
+   * @throws {ExportError} If a password is required but not provided.
+   */
   async exportData(customExportPassword?: string): Promise<string> {
     await this.ready;
     this.requireConfig();
@@ -337,7 +422,7 @@ export class SecureLocalStorage {
       : await DeviceKeyProvider.getKey(this.idbConfig);
 
     // IMPORTANT: Re-unwrap as extractable so we can wrap for export
-    await this.unwrapDekWithKek(activeKek, true, this.wrapAadFor(this.config!));
+    await this.unwrapDekWithKek(activeKek, true, this.versionManager.getAadFor("wrap", this.config!));
 
     // Build export KEK & header fields
     let saltB64: string;
@@ -366,9 +451,9 @@ export class SecureLocalStorage {
 
     // Rewrap under export AAD and re-encrypt data bound to that header
     const ctx: PersistedConfigV3["header"]["ctx"] = "export";
-    const wrapAad = this.buildWrapAad(ctx, SLS_CONSTANTS.MIGRATION_TARGET_VERSION);
+    const wrapAad = this.versionManager.buildWrapAad(ctx, SLS_CONSTANTS.MIGRATION_TARGET_VERSION);
     const { ivWrap, wrappedKey } = await this.enc.wrapDek(this.dek!, kek, wrapAad);
-    const dataAad = this.buildDataAad(ctx, SLS_CONSTANTS.MIGRATION_TARGET_VERSION, ivWrap, wrappedKey);
+    const dataAad = this.versionManager.buildDataAad(ctx, SLS_CONSTANTS.MIGRATION_TARGET_VERSION, ivWrap, wrappedKey);
     const { iv, ciphertext } = await this.enc.encryptData(this.dek!, plain, dataAad);
 
     const bundle: PersistedConfigV3 = {
@@ -386,6 +471,14 @@ export class SecureLocalStorage {
     return JSON.stringify(bundle);
   }
 
+  /**
+   * Imports data from a serialized string, overwriting the current store.
+   *
+   * @param serialized The serialized data bundle to import.
+   * @param password The password required to decrypt the bundle, if it is protected.
+   * @returns A promise that resolves with a string indicating the protection mode of the imported data ("masterPassword" or "customExportPassword").
+   * @throws {ImportError} If the serialized data is invalid, corrupted, or the password is incorrect.
+   */
   async importData(serialized: string, password?: string): Promise<string> {
     await this.ready;
     let t: unknown;
@@ -417,10 +510,10 @@ export class SecureLocalStorage {
     }
 
     // Select AAD context for the incoming bundle
-    const ctx = this.isV3(bundle) ? (bundle.header.ctx ?? "store") : undefined;
-    const wrapAad = this.isV3(bundle) ? this.buildWrapAad(ctx!, bundle.header.v) : undefined;
+    const ctx = this.versionManager.isV3(bundle) ? (bundle.header.ctx ?? "store") : undefined;
+    const wrapAad = this.versionManager.isV3(bundle) ? this.versionManager.buildWrapAad(ctx!, bundle.header.v) : undefined;
     const dataAadBuilder = (iv: string, wk: string) =>
-      this.isV3(bundle) ? this.buildDataAad(ctx!, bundle.header.v, iv, wk) : undefined;
+      this.versionManager.isV3(bundle) ? this.versionManager.buildDataAad(ctx!, bundle.header.v, iv, wk) : undefined;
 
     if (isMasterProtected) {
       try {
@@ -437,14 +530,14 @@ export class SecureLocalStorage {
       // Accept bundle as-is (master mode) and persist into local store with ctx:"store" (and v3)
       // For master imports we keep master mode; but we must ensure local store uses ctx:"store"
       // If imported bundle is v2 or ctx:"export", rewrap/re-encrypt under store AAD.
-      if (!this.isV3(bundle) || (this.isV3(bundle) && bundle.header.ctx !== "store")) {
+      if (!this.versionManager.isV3(bundle) || (this.versionManager.isV3(bundle) && bundle.header.ctx !== "store")) {
         // Rewrap to store context & persist v3
         const kek = await deriveKekFromPassword(password, base64ToBytes(bundle.header.salt), (bundle.header as any).rounds);
         const dek = await this.enc.unwrapDek(bundle.header.iv, bundle.header.wrappedKey, kek, true, wrapAad);
         const ctxStore: PersistedConfigV3["header"]["ctx"] = "store";
-        const wrapAadStore = this.buildWrapAad(ctxStore, SLS_CONSTANTS.MIGRATION_TARGET_VERSION);
+        const wrapAadStore = this.versionManager.buildWrapAad(ctxStore, SLS_CONSTANTS.MIGRATION_TARGET_VERSION);
         const wrapped = await this.enc.wrapDek(dek, kek, wrapAadStore);
-        const dataAadStore = this.buildDataAad(ctxStore, SLS_CONSTANTS.MIGRATION_TARGET_VERSION, wrapped.ivWrap, wrapped.wrappedKey);
+        const dataAadStore = this.versionManager.buildDataAad(ctxStore, SLS_CONSTANTS.MIGRATION_TARGET_VERSION, wrapped.ivWrap, wrapped.wrappedKey);
         const plain = bundle.data.iv && bundle.data.ciphertext
           ? await this.enc.decryptData<Record<string, unknown>>(dek, bundle.data.iv, bundle.data.ciphertext, dataAadBuilder(bundle.header.iv, bundle.header.wrappedKey))
           : {};
@@ -482,9 +575,9 @@ export class SecureLocalStorage {
 
       // Persist into local store with v3 ctx:"store"
       const ctxStore: PersistedConfigV3["header"]["ctx"] = "store";
-      const wrapAadStore = this.buildWrapAad(ctxStore, SLS_CONSTANTS.MIGRATION_TARGET_VERSION);
+      const wrapAadStore = this.versionManager.buildWrapAad(ctxStore, SLS_CONSTANTS.MIGRATION_TARGET_VERSION);
       const { ivWrap, wrappedKey } = await this.enc.wrapDek(extractableDek, deviceKek, wrapAadStore);
-      const dataAadStore = this.buildDataAad(ctxStore, SLS_CONSTANTS.MIGRATION_TARGET_VERSION, ivWrap, wrappedKey);
+      const dataAadStore = this.versionManager.buildDataAad(ctxStore, SLS_CONSTANTS.MIGRATION_TARGET_VERSION, ivWrap, wrappedKey);
 
       const plain = bundle.data.iv && bundle.data.ciphertext
         ? await this.enc.decryptData<Record<string, unknown>>(extractableDek, bundle.data.iv, bundle.data.ciphertext, dataAadBuilder(bundle.header.iv, bundle.header.wrappedKey))
@@ -511,6 +604,9 @@ export class SecureLocalStorage {
     }
   }
 
+  /**
+   * Clears all data from the store, including the device key, and reinitializes it.
+   */
   async clear(): Promise<void> {
     await this.ready;
     this.session.clear();
@@ -523,47 +619,17 @@ export class SecureLocalStorage {
   // --------------------------- private helpers ---------------------------
 
   private async initialize(forceFresh = false): Promise<void> {
-    const isValidConfig = (cfg: PersistedConfig | null): cfg is PersistedConfig => {
-      if (!cfg) return false;
-      const h = cfg.header as any;
-      const d = cfg.data as any;
-
-      if (!SLS_CONSTANTS.SUPPORTED_VERSIONS.includes(h.v)) return false;
-      if (typeof h.rounds !== "number" || h.rounds < 1) return false;
-      if (typeof h.iv !== "string" || typeof h.wrappedKey !== "string") return false;
-      if (!d || typeof d.iv !== "string" || typeof d.ciphertext !== "string") return false;
-
-      if (h.rounds === 1) {
-        if (h.salt !== "") return false;
-      } else {
-        if (typeof h.salt !== "string" || h.salt.length === 0) return false;
-      }
-
-      // v3 local store must have ctx:"store" (export bundles do not belong in localStorage)
-      if (h.v === 3 && h.ctx && h.ctx !== "store") return false;
-
-      try {
-        base64ToBytes(h.iv);
-        base64ToBytes(h.wrappedKey);
-        if (d.iv) base64ToBytes(d.iv);
-        if (d.ciphertext) base64ToBytes(d.ciphertext);
-      } catch {
-        return false;
-      }
-      return true;
-    };
-
     if (forceFresh) {
       // Create fresh v3 store with empty object
       const dek = await this.enc.createDek();
       const deviceKek = await DeviceKeyProvider.getKey(this.idbConfig);
 
       const ctx: PersistedConfigV3["header"]["ctx"] = "store";
-      const wrapAad = this.buildWrapAad(ctx, SLS_CONSTANTS.MIGRATION_TARGET_VERSION);
+      const wrapAad = this.versionManager.buildWrapAad(ctx, SLS_CONSTANTS.MIGRATION_TARGET_VERSION);
       const { ivWrap, wrappedKey } = await this.enc.wrapDek(dek, deviceKek, wrapAad);
       const unwrappedDek = await this.enc.unwrapDek(ivWrap, wrappedKey, deviceKek, false, wrapAad);
 
-      const dataAad = this.buildDataAad(ctx, SLS_CONSTANTS.MIGRATION_TARGET_VERSION, ivWrap, wrappedKey);
+      const dataAad = this.versionManager.buildDataAad(ctx, SLS_CONSTANTS.MIGRATION_TARGET_VERSION, ivWrap, wrappedKey);
       const { iv, ciphertext } = await this.enc.encryptData(unwrappedDek, {}, dataAad); // empty object
 
       this.config = {
@@ -583,7 +649,7 @@ export class SecureLocalStorage {
     }
 
     const existing = this.store.get();
-    if (!isValidConfig(existing)) {
+    if (!this.versionManager.isValidConfig(existing)) {
       this.lastResetReason = "invalid-config";
       await this.initialize(true);
       return;
@@ -596,10 +662,10 @@ export class SecureLocalStorage {
       const deviceKek = await DeviceKeyProvider.getKey(this.idbConfig);
       try {
         // Try unwrapping with proper AAD
-        await this.unwrapDekWithKek(deviceKek, false, this.wrapAadFor(existing));
+        await this.unwrapDekWithKek(deviceKek, false, this.versionManager.getAadFor("wrap", existing));
 
         // If v2, migrate immediately
-        if (this.isV2(existing)) {
+        if (this.versionManager.isV2(existing)) {
           await this.migrateV2ToV3("device", existing, deviceKek);
         }
       } catch {
@@ -632,10 +698,10 @@ export class SecureLocalStorage {
     if (this.dek) return;
     if (this.isUsingMasterPassword()) {
       const kek = this.sessionKekOrThrow();
-      await this.unwrapDekWithKek(kek, false, this.wrapAadFor(this.config!));
+      await this.unwrapDekWithKek(kek, false, this.versionManager.getAadFor("wrap", this.config!));
     } else {
       const deviceKek = await DeviceKeyProvider.getKey(this.idbConfig);
-      await this.unwrapDekWithKek(deviceKek, false, this.wrapAadFor(this.config!));
+      await this.unwrapDekWithKek(deviceKek, false, this.versionManager.getAadFor("wrap", this.config!));
     }
   }
 
@@ -683,46 +749,11 @@ export class SecureLocalStorage {
 
   // ---------- AAD helpers & version helpers ----------
 
-  private buildWrapAad(ctx: "store" | "export", version: number): Uint8Array {
-    const root = ctx === "store" ? this.storageKeyStr : "export";
-    const s = `sls|wrap|v${version}|${root}`;
-    return new TextEncoder().encode(s);
-  }
 
-  private buildDataAad(ctx: "store" | "export", version: number, ivWrap: string, wrappedKey: string): Uint8Array {
-    const root = ctx === "store" ? this.storageKeyStr : "export";
-    const s = `sls|data|v${version}|${root}|${ivWrap}|${wrappedKey}`;
-    return new TextEncoder().encode(s);
-  }
-
-  private wrapAadFor(cfg: PersistedConfig | null): Uint8Array | undefined {
-    if (!cfg) return undefined;
-    if (this.isV3(cfg)) {
-      const ctx = cfg.header.ctx ?? "store";
-      return this.buildWrapAad(ctx, cfg.header.v);
-    }
-    return undefined;
-    }
-
-  private dataAadFor(cfg: PersistedConfig | null): Uint8Array | undefined {
-    if (!cfg) return undefined;
-    if (this.isV3(cfg)) {
-      const ctx = cfg.header.ctx ?? "store";
-      return this.buildDataAad(ctx, cfg.header.v, cfg.header.iv, cfg.header.wrappedKey);
-    }
-    return undefined;
-  }
-
-  private isV3(cfg: PersistedConfig): cfg is PersistedConfigV3 {
-    return (cfg.header as any).v === 3;
-  }
-  private isV2(cfg: PersistedConfig): cfg is PersistedConfigV2 {
-    return (cfg.header as any).v === 2;
-  }
 
   private async decryptCurrentData(): Promise<Record<string, unknown>> {
     if (!this.config!.data.iv || !this.config!.data.ciphertext) return {};
-    const aad = this.dataAadFor(this.config);
+    const aad = this.versionManager.getAadFor("data", this.config);
     return await this.enc.decryptData<Record<string, unknown>>(
       this.dek!, this.config!.data.iv, this.config!.data.ciphertext, aad
     );
@@ -741,11 +772,11 @@ export class SecureLocalStorage {
 
     // Rewrap with v3 store AAD
     const ctx: PersistedConfigV3["header"]["ctx"] = "store";
-    const wrapAad = this.buildWrapAad(ctx, SLS_CONSTANTS.MIGRATION_TARGET_VERSION);
+    const wrapAad = this.versionManager.buildWrapAad(ctx, SLS_CONSTANTS.MIGRATION_TARGET_VERSION);
     const { ivWrap, wrappedKey } = await this.enc.wrapDek(dek, kek, wrapAad);
 
     // Re-encrypt data with v3 data AAD bound to new header
-    const dataAad = this.buildDataAad(ctx, SLS_CONSTANTS.MIGRATION_TARGET_VERSION, ivWrap, wrappedKey);
+    const dataAad = this.versionManager.buildDataAad(ctx, SLS_CONSTANTS.MIGRATION_TARGET_VERSION, ivWrap, wrappedKey);
     const { iv, ciphertext } = await this.enc.encryptData(dek, plain, dataAad);
 
     this.config = {
