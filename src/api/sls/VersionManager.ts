@@ -18,9 +18,9 @@ import {
 
     public getAadFor(
       type: "wrap" | "data",
-      config: PersistedConfig
+      config: PersistedConfig | null
     ): Uint8Array | undefined {
-      if (this.isV3(config)) {
+      if (config && this.isV3(config)) {
         const ctx = config.header.ctx ?? "store";
         if (type === "wrap") {
           return this.buildWrapAad(ctx, config.header.v);

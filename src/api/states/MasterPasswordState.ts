@@ -1,12 +1,14 @@
 import { State } from "./BaseState";
 import { DeviceModeState } from "./DeviceModeState";
 import { LockedState } from "./LockedState";
-import { ModeError, ValidationError } from "../../errors";
+import { InitialState } from "./InitialState";
+import { ExportError, ModeError, ValidationError } from "../../errors";
 import { SLS_CONSTANTS } from "../../constants";
 import { base64ToBytes } from "../../utils/base64";
 import { toPlainJson } from "../../utils/json";
 import { makeSecureDataView, SecureDataView } from "../../utils/secureDataView";
 import type { PersistedConfigV3 } from "../../types";
+import { ExportSpec, Portability } from "../sls/Portability";
 
 export class MasterPasswordState extends State {
   isUsingMasterPassword(): boolean {
@@ -59,7 +61,6 @@ export class MasterPasswordState extends State {
     this.context.persist();
     this.transitionTo(new DeviceModeState(this.context));
   }
-
   async rotateMasterPassword(oldMasterPassword: string, newMasterPassword: string): Promise<void> {
     this.context.requireConfig();
 
@@ -68,37 +69,62 @@ export class MasterPasswordState extends State {
       throw new ValidationError("newMasterPassword must be a non-empty string");
     }
 
-    // This is a bit of a hack, but it's the simplest way to verify the old password
-    await this.context.unlock(oldMasterPassword);
+    // Explicitly verify the old password against the current header using AAD.
+    const { salt, rounds, iv, wrappedKey } = this.context.config!.header as any;
+    try {
+      const verifyKek = await this.context.deriveKekFromPassword(
+        oldMasterPassword,
+        base64ToBytes(salt),
+        rounds
+      );
+      const wrapAad = this.context.versionManager.getAadFor("wrap", this.context.config!);
+      await this.context.enc.unwrapDek(iv, wrappedKey, verifyKek, false, wrapAad);
+    } catch {
+      throw new ValidationError("Invalid master password");
+    }
 
-    await this.context.unwrapDekWithKek(this.context.sessionKekOrThrow(), true, this.context.versionManager.getAadFor("wrap", this.context.config!));
+    // Proceed with rotation using the currently unlocked session KEK/DEK.
+    await this.context.unwrapDekWithKek(
+      this.context.sessionKekOrThrow(),
+      true,
+      this.context.versionManager.getAadFor("wrap", this.context.config!)
+    );
     const plain = await this.context.decryptCurrentData();
 
     const saltB64 = this.context.enc.generateSaltB64();
-    const rounds = SLS_CONSTANTS.ARGON2.ITERATIONS;
-    const newKek = await this.context.deriveKekFromPassword(newMasterPassword, base64ToBytes(saltB64), rounds);
+    const newRounds = SLS_CONSTANTS.ARGON2.ITERATIONS;
+    const newKek = await this.context.deriveKekFromPassword(
+      newMasterPassword,
+      base64ToBytes(saltB64),
+      newRounds
+    );
 
     const ctx: PersistedConfigV3["header"]["ctx"] = "store";
     const wrapAad = this.context.versionManager.buildWrapAad(ctx, SLS_CONSTANTS.MIGRATION_TARGET_VERSION);
-    const { ivWrap, wrappedKey } = await this.context.enc.wrapDek(this.context.dek!, newKek, wrapAad);
+    const { ivWrap, wrappedKey: newWrappedKey } = await this.context.enc.wrapDek(this.context.dek!, newKek, wrapAad);
 
-    const dataAad = this.context.versionManager.buildDataAad(ctx, SLS_CONSTANTS.MIGRATION_TARGET_VERSION, ivWrap, wrappedKey);
-    const { iv, ciphertext } = await this.context.enc.encryptData(this.context.dek!, plain, dataAad);
+    const dataAad = this.context.versionManager.buildDataAad(
+      ctx,
+      SLS_CONSTANTS.MIGRATION_TARGET_VERSION,
+      ivWrap,
+      newWrappedKey
+    );
+    const { iv: dataIv, ciphertext } = await this.context.enc.encryptData(this.context.dek!, plain, dataAad);
 
     this.context.config = {
       header: {
         v: SLS_CONSTANTS.MIGRATION_TARGET_VERSION,
         salt: saltB64,
-        rounds,
+        rounds: newRounds,
         iv: ivWrap,
-        wrappedKey,
+        wrappedKey: newWrappedKey,
         ctx
       },
-      data: { iv, ciphertext }
+      data: { iv: dataIv, ciphertext }
     };
 
-    this.context.session.set(newKek, saltB64, rounds);
-    this.context.dek = await this.context.enc.unwrapDek(ivWrap, wrappedKey, newKek, false, wrapAad);
+    this.context.session.set(newKek, saltB64, newRounds);
+    this.context.dek = await this.context.enc.unwrapDek(ivWrap, newWrappedKey, newKek, false, wrapAad);
 
     this.context.persist();
   }
@@ -150,14 +176,55 @@ export class MasterPasswordState extends State {
     this.context.persist();
   }
 
-  exportData(customExportPassword?: string): Promise<string> {
-    throw new Error("Method not implemented.");
+  async exportData(customExportPassword?: string): Promise<string> {
+    this.context.requireConfig();
+    await this.context.ensureDekLoaded();
+
+    const plain = await this.context.decryptCurrentData();
+
+    // Make DEK extractable for wrapping
+    const sessionKek = this.context.sessionKekOrThrow();
+    await this.context.unwrapDekWithKek(
+      sessionKek,
+      true,
+      this.context.versionManager.getAadFor("wrap", this.context.config)
+    );
+
+    let spec: ExportSpec;
+    if (!customExportPassword) {
+      // Use existing session KEK + original salt/rounds, mPw:true
+      spec = {
+        dek: this.context.dek!,
+        kek: sessionKek,
+        saltB64: (this.context.config!.header as any).salt,
+        rounds: (this.context.config!.header as any).rounds,
+        mPw: true
+      };
+    } else {
+      if (!customExportPassword.trim()) throw new ExportError("Export password must be a non-empty string");
+      const saltB64 = this.context.enc.generateSaltB64();
+      const rounds = SLS_CONSTANTS.ARGON2.ITERATIONS;
+      const kek = await this.context.deriveKekFromPassword(
+        customExportPassword,
+        base64ToBytes(saltB64),
+        rounds
+      );
+      spec = { dek: this.context.dek!, kek, saltB64, rounds, mPw: false };
+    }
+
+    return Portability.buildExportBundle(this.context.enc, this.context.versionManager, spec, plain);
   }
   importData(serialized: string, password?: string): Promise<string> {
     throw new Error("Method not implemented.");
   }
   clear(): Promise<void> {
-    throw new Error("Method not implemented.");
+    return (async () => {
+      this.context.session.clear();
+      this.context.dek = null;
+      this.context.store.clear();
+      await this.context.deviceKeyProvider.deletePersistent(this.context.idbConfig);
+      await new InitialState(this.context).initialize(true);
+    })();
   }
   initialize(forceFresh?: boolean): Promise<void> {
     throw new Error("Method not implemented.");

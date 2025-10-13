@@ -1,5 +1,6 @@
 import { State } from "./BaseState";
 import { MasterPasswordState } from "./MasterPasswordState";
+import { InitialState } from "./InitialState";
 import { ValidationError, LockedError } from "../../errors";
 import { base64ToBytes } from "../../utils/base64";
 
@@ -73,7 +74,13 @@ export class LockedState extends State {
     throw new Error("Method not implemented.");
   }
   clear(): Promise<void> {
-    throw new Error("Method not implemented.");
+    return (async () => {
+      this.context.session.clear();
+      this.context.dek = null;
+      this.context.store.clear();
+      await this.context.deviceKeyProvider.deletePersistent(this.context.idbConfig);
+      await new InitialState(this.context).initialize(true);
+    })();
   }
   initialize(forceFresh?: boolean): Promise<void> {
     throw new Error("Method not implemented.");

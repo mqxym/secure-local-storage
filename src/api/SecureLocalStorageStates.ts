@@ -6,19 +6,18 @@ import { SLS_CONSTANTS } from "../constants";
 import { StorageService } from "../storage/StorageService";
 import type { PersistedConfig, PersistedConfigV2, PersistedConfigV3 } from "../types";
 import { base64ToBytes } from "../utils/base64";
-import { toPlainJson } from "../utils/json";
-import { makeSecureDataView, SecureDataView } from "../utils/secureDataView";
+import {  SecureDataView } from "../utils/secureDataView";
+import { LockedState } from "./states/LockedState";
+import { DeviceModeState } from "./states/DeviceModeState";
 import type { IdbConfig } from "../crypto/DeviceKeyProvider";
 import {
-  ExportError,
   ImportError,
   LockedError,
-  ModeError,
-  ValidationError
 } from "../errors";
 import { VersionManager } from "./sls/VersionManager";
 import { State } from "./states/BaseState";
 import { InitialState } from "./states/InitialState";
+import { Portability } from "./sls/Portability";
 
 export interface SecureLocalStorageOptions {
   storageKey?: string;
@@ -107,83 +106,16 @@ export class SecureLocalStorage {
 
   public async exportData(customExportPassword?: string): Promise<string> {
     await this.ready;
-    this.requireConfig();
-
-    await this.ensureDekLoaded();
-    const plain = await this.decryptCurrentData();
-
-    const activeKek = this.isUsingMasterPassword()
-      ? this.sessionKekOrThrow()
-      : await DeviceKeyProvider.getKey(this.idbConfig);
-
-    await this.unwrapDekWithKek(activeKek, true, this.versionManager.getAadFor("wrap", this.config!));
-
-    let saltB64: string;
-    let rounds: number;
-    let kek: CryptoKey;
-    let mPw: boolean;
-
-    if (!customExportPassword && this.isUsingMasterPassword()) {
-      saltB64 = this.config!.header.salt;
-      rounds = this.config!.header.rounds;
-      kek = this.sessionKekOrThrow();
-      mPw = true;
-    } else {
-      if (!customExportPassword) {
-        throw new ExportError("Export password required in device mode");
-      }
-      if (typeof customExportPassword !== "string" || customExportPassword.trim().length === 0) {
-        throw new ExportError("Export password must be a non-empty string");
-      }
-      saltB64 = this.enc.generateSaltB64();
-      rounds = SLS_CONSTANTS.ARGON2.ITERATIONS;
-      kek = await deriveKekFromPassword(customExportPassword, base64ToBytes(saltB64), rounds);
-      mPw = false;
-    }
-
-    const ctx: PersistedConfigV3["header"]["ctx"] = "export";
-    const wrapAad = this.versionManager.buildWrapAad(ctx, SLS_CONSTANTS.MIGRATION_TARGET_VERSION);
-    const { ivWrap, wrappedKey } = await this.enc.wrapDek(this.dek!, kek, wrapAad);
-    const dataAad = this.versionManager.buildDataAad(ctx, SLS_CONSTANTS.MIGRATION_TARGET_VERSION, ivWrap, wrappedKey);
-    const { iv, ciphertext } = await this.enc.encryptData(this.dek!, plain, dataAad);
-
-    const bundle: PersistedConfigV3 = {
-      header: {
-        v: SLS_CONSTANTS.MIGRATION_TARGET_VERSION,
-        salt: saltB64,
-        rounds,
-        iv: ivWrap,
-        wrappedKey,
-        mPw,
-        ctx
-      },
-      data: { iv, ciphertext }
-    };
-    return JSON.stringify(bundle);
+    return this.state.exportData(customExportPassword);
   }
 
   public async importData(serialized: string, password?: string): Promise<string> {
     await this.ready;
     let t: unknown;
-    try {
-      t = JSON.parse(serialized);
-    } catch {
-      throw new ImportError("Invalid export structure");
-    }
-    if (!t || typeof t !== "object" || typeof (t as any).header !== "object" || typeof (t as any).data !== "object") {
-      throw new ImportError("Invalid export structure");
-    }
-    const bundle = t as PersistedConfig;
-
-    if (!SLS_CONSTANTS.SUPPORTED_VERSIONS.includes(bundle.header.v as 2 | 3)) {
-      throw new ImportError(`Unsupported export version ${(bundle as any).header?.v}`);
-    }
+ 
+    const { bundle, isMasterProtected } = Portability.parseAndClassify(serialized, SLS_CONSTANTS.SUPPORTED_VERSIONS);   
 
     this.validateBundle(bundle);
-
-    const isMasterProtected =
-      (bundle as any).header.mPw === true ||
-      ((bundle.header as any).rounds > 1 && (bundle as any).header.mPw !== false);
 
     if (typeof password !== "string" || password.length === 0) {
       throw new ImportError(isMasterProtected
@@ -239,6 +171,7 @@ export class SecureLocalStorage {
       this.dek = null;
       this.session.clear();
       this.persist();
+      this.transitionTo(new LockedState(this));
       return "masterPassword";
     }
 
@@ -272,6 +205,7 @@ export class SecureLocalStorage {
       this.dek = await this.enc.unwrapDek(ivWrap, wrappedKey, deviceKek, false, wrapAadStore);
       this.session.clear();
       this.persist();
+      this.transitionTo(new DeviceModeState(this));
       return "customExportPassword";
     } catch {
       throw new ImportError("Invalid export password or corrupted export data");

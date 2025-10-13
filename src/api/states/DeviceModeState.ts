@@ -6,6 +6,9 @@ import { base64ToBytes } from "../../utils/base64";
 import { toPlainJson } from "../../utils/json";
 import { makeSecureDataView, SecureDataView } from "../../utils/secureDataView";
 import type { PersistedConfigV3 } from "../../types";
+import { InitialState } from "./InitialState";
+import { ExportSpec, Portability } from "../sls/Portability";
+import { ExportError } from "../../errors";
 
 export class DeviceModeState extends State {
   isUsingMasterPassword(): boolean {
@@ -148,14 +151,46 @@ export class DeviceModeState extends State {
     this.context.persist();
   }
 
-  exportData(customExportPassword?: string): Promise<string> {
-    throw new Error("Method not implemented.");
+  async exportData(customExportPassword?: string): Promise<string> {
+    if (!customExportPassword || !customExportPassword.trim()) {
+      throw new ExportError("Export password required in device mode");
+    }
+    
+    this.context.requireConfig();
+    await this.context.ensureDekLoaded();
+
+    const plain = await this.context.decryptCurrentData();
+
+    // Make DEK extractable for wrapping
+    const deviceKek = await this.context.deviceKeyProvider.getKey(this.context.idbConfig);
+    await this.context.unwrapDekWithKek(
+      deviceKek,
+      true,
+      this.context.versionManager.getAadFor("wrap", this.context.config)
+    );
+    const saltB64 = this.context.enc.generateSaltB64();
+    const rounds = SLS_CONSTANTS.ARGON2.ITERATIONS;
+    const kek = await this.context.deriveKekFromPassword(
+      customExportPassword,
+      base64ToBytes(saltB64),
+      rounds
+    );
+
+    const spec: ExportSpec = { dek: this.context.dek!, kek, saltB64, rounds, mPw: false };
+    return Portability.buildExportBundle(this.context.enc, this.context.versionManager, spec, plain);
   }
+
   importData(serialized: string, password?: string): Promise<string> {
     throw new Error("Method not implemented.");
   }
   clear(): Promise<void> {
-    throw new Error("Method not implemented.");
+    return (async () => {
+      this.context.session.clear();
+      this.context.dek = null;
+      this.context.store.clear();
+      await this.context.deviceKeyProvider.deletePersistent(this.context.idbConfig);
+      await new InitialState(this.context).initialize(true);
+    })();
   }
   initialize(forceFresh?: boolean): Promise<void> {
     throw new Error("Method not implemented.");

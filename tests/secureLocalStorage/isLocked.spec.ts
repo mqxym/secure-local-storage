@@ -1,4 +1,4 @@
-import { SecureLocalStorage } from "../../src/api/SecureLocalStorage";
+import { SecureLocalStorage } from "../../node_modules/SecureLocalStorage";
 import { SLS_CONSTANTS } from "../../src/constants";
 
 const MASTER_PASSWORD = "my-secret-password-123";

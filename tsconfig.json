@@ -17,5 +17,5 @@
     "outDir": "build-tmp",
     "types": ["node", "jest"]
   },
-  "include": ["src", "tests"]
+  "include": ["src", "tests", "node_modules/SecureLocalStorage.ts"]
 }
