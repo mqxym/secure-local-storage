@@ -1,6 +1,6 @@
 import { SLS_CONSTANTS } from "../constants";
-import { PersistedConfigV2 } from "../types";
-import { StorageFullError } from "../errors";
+import { type PersistedConfig } from "../types";
+import { StorageFullError, PersistenceError } from "../errors";
 
 function estimateBytes(s: string): number {
   try { return new Blob([s]).size; } catch { return s.length; }
@@ -13,10 +13,10 @@ export class StorageService {
     this.key = key;
   }
 
-  get(): PersistedConfigV2 | null {
+  get(): PersistedConfig | null {
     const raw = localStorage.getItem(this.key);
     if (!raw) return null;
-    try { return JSON.parse(raw) as PersistedConfigV2; } catch { return null; }
+    try { return JSON.parse(raw) as PersistedConfig; } catch { return null; }
   }
 
   _isQuotaExceeded(err: unknown): boolean {
@@ -34,18 +34,20 @@ export class StorageService {
     );
   }
 
-  set(cfg: PersistedConfigV2): void {
+  set(cfg: PersistedConfig): void {
     const serialized = JSON.stringify(cfg);
     try {
       localStorage.setItem(this.key, serialized);
       const check = localStorage.getItem(this.key);
-      if (check !== serialized) throw new StorageFullError("Failed to persist data");
+      if (check !== serialized) {
+        throw new PersistenceError("Failed to persist data (integrity check)");
+      }
     } catch (e) {
       if (this._isQuotaExceeded(e)) {
         throw new StorageFullError(`localStorage quota exceeded (${estimateBytes(serialized)} bytes)`);
       }
       const msg = (e as Error)?.message ?? String(e);
-      throw new StorageFullError(`Failed to persist data: ${msg}`);
+      throw new PersistenceError(`Failed to persist data: ${msg}`);
     }
   }
 

@@ -1,62 +1,69 @@
 export class SlsError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "SlsError";
-  }
+    constructor(message: string) {
+        super(message);
+        this.name = "SlsError";
+    }
 }
 
 export class ValidationError extends SlsError {
-  constructor(message: string) {
-    super(message);
-    this.name = "ValidationError";
-  }
+    constructor(message: string) {
+        super(message);
+        this.name = "ValidationError";
+    }
 }
 
 export class LockedError extends SlsError {
-  constructor(message = "Session locked") {
-    super(message);
-    this.name = "LockedError";
-  }
+    constructor(message = "Session locked") {
+        super(message);
+        this.name = "LockedError";
+    }
 }
 
 export class ModeError extends SlsError {
-  constructor(message: string) {
-    super(message);
-    this.name = "ModeError";
-  }
+    constructor(message: string) {
+        super(message);
+        this.name = "ModeError";
+    }
 }
 
 export class StorageFullError extends SlsError {
-  constructor(message = "localStorage quota exceeded") {
-    super(message);
-    this.name = "StorageFullError";
-  }
+    constructor(message = "localStorage quota exceeded") {
+        super(message);
+        this.name = "StorageFullError";
+    }
 }
 
 export class CryptoError extends SlsError {
-  constructor(message: string) {
-    super(message);
-    this.name = "CryptoError";
-  }
+    constructor(message: string) {
+        super(message);
+        this.name = "CryptoError";
+    }
 }
 
 export class ImportError extends SlsError {
-  constructor(message: string) {
-    super(message);
-    this.name = "ImportError";
-  }
+    constructor(message: string) {
+        super(message);
+        this.name = "ImportError";
+    }
 }
 
 export class ExportError extends SlsError {
-  constructor(message: string) {
-    super(message);
-    this.name = "ExportError";
-  }
+    constructor(message: string) {
+        super(message);
+        this.name = "ExportError";
+    }
 }
 
 export class NotSupportedError extends SlsError {
-  constructor(message: string) {
-    super(message);
-    this.name = "NotSupportedError";
-  }
+    constructor(message: string) {
+        super(message);
+        this.name = "NotSupportedError";
+    }
+}
+
+export class PersistenceError extends SlsError {
+    constructor(message: string) {
+        super(message);
+        this.name = "PersistenceError";
+    }
 }

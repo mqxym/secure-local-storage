@@ -29,3 +29,17 @@ describe("EncryptionManager hardening (IV length & base64)", () => {
     await expect(enc.unwrapDek("!!!", "###", kek, false)).rejects.toBeInstanceOf(ValidationError);
   });
 });
+
+
+describe("EncryptionManager hardening (AES key length enforcement)", () => {
+  it("wrapDek rejects KEK with wrong AES length (e.g., 128-bit)", async () => {
+    const enc = new EncryptionManager();
+    const dek = await enc.createDek();
+    const kek128 = await crypto.subtle.generateKey(
+      { name: "AES-GCM", length: 128 }, // wrong length, we require 256
+      false,
+      ["wrapKey", "unwrapKey"]
+    );
+    await expect(enc.wrapDek(dek, kek128)).rejects.toBeInstanceOf(ValidationError);
+  });
+});

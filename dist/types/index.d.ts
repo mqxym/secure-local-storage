@@ -1,6 +1,6 @@
-import { SecureLocalStorage, type SecureLocalStorageOptions } from "./api/SecureLocalStorage";
-export type { SecureLocalStorageOptions } from "./api/SecureLocalStorage";
-export { SecureLocalStorage } from "./api/SecureLocalStorage";
+import { SecureLocalStorage, type SecureLocalStorageOptions } from "./api/SecureLocalStorageStates";
+export type { SecureLocalStorageOptions } from "./api/SecureLocalStorageStates";
+export { SecureLocalStorage } from "./api/SecureLocalStorageStates";
 /**
  * Creates and initializes a new `SecureLocalStorage` instance.
  *

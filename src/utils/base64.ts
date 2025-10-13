@@ -10,13 +10,19 @@ export function bytesToBase64(bytes: ArrayBuffer | Uint8Array): string {
 
 import { ValidationError } from "../errors";
 
+const MAX_BASE64_LEN = 15 * 1024 * 1024; 
+
 export function base64ToBytes(b64: string): Uint8Array {
   if (typeof b64 !== "string" || b64.trim().length === 0) {
     throw new ValidationError("Base64 input must be a non-empty string");
   }
+  // normalize: remove whitespace, convert URL-safe to standard, add padding
+  const cleaned = b64.replace(/\s+/g, "").replace(/-/g, "+").replace(/_/g, "/");
+  if (cleaned.length > MAX_BASE64_LEN) {
+    throw new ValidationError("Base64 input too large");
+  }
+
   try {
-    // normalize: remove whitespace, convert URL-safe to standard, add padding
-    const cleaned = b64.replace(/\s+/g, "").replace(/-/g, "+").replace(/_/g, "/");
     const pad = cleaned.length % 4;
     const normalized = pad === 0 ? cleaned : cleaned + "=".repeat(4 - pad);
 

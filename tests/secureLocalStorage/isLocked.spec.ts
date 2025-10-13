@@ -1,4 +1,6 @@
-import { SecureLocalStorage } from "../../src/api/SecureLocalStorage";
+import "../setup";
+import {SecureLocalStorage} from "../../src";
+import { LockedError } from "../../src/errors";
 import { SLS_CONSTANTS } from "../../src/constants";
 
 const MASTER_PASSWORD = "my-secret-password-123";
@@ -52,5 +54,17 @@ describe("SecureLocalStorage.isLocked", () => {
 
     expect(sls2.isUsingMasterPassword()).toBe(true);
     expect(sls2.isLocked()).toBe(true);
+  });
+});
+
+
+describe("exportData while locked (master mode)", () => {
+  it("throws LockedError", async () => {
+    const sls = new SecureLocalStorage({ storageKey: "test:locked:export" });
+    await sls.setData({ a: 1 });
+    await sls.setMasterPassword("pw-1");
+    sls.lock();
+
+    await expect(sls.exportData("any-pass")).rejects.toBeInstanceOf(LockedError);
   });
 });
