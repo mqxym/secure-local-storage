@@ -22,6 +22,20 @@ function memKeyId(cfg: IdbConfig): string {
   return `${cfg.dbName}::${cfg.storeName}::${cfg.keyId}`;
 }
 
+function isValidKek(candidate: unknown): candidate is CryptoKey {
+  const key = candidate as CryptoKey | undefined;
+  const algoName = (key?.algorithm as { name?: unknown })?.name;
+  const usages = (key?.usages ?? []) as KeyUsage[];
+  return (
+    !!key &&
+    typeof algoName === "string" &&
+    algoName === SLS_CONSTANTS.AES.NAME &&
+    Array.isArray(usages) &&
+    usages.includes("wrapKey") &&
+    usages.includes("unwrapKey")
+  );
+}
+
 /**
  * Persists a non-extractable AES-GCM KEK in IndexedDB (origin-bound).
  * Falls back to an in-memory key if IndexedDB is unavailable or rejects storing CryptoKey.
@@ -63,10 +77,17 @@ export class DeviceKeyProvider {
         req.onerror = () => reject(req.error);
       });
 
-      if (existing) {
+      if (isValidKek(existing)) {
         this.memoryKeys.set(mk, existing);
         return existing;
       }
+
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(cfg.storeName, "readwrite");
+        const del = tx.objectStore(cfg.storeName).delete(cfg.keyId);
+        del.onsuccess = () => resolve();
+        del.onerror = () => reject(del.error);
+      }).catch(() => { /* non-fatal */ });
 
       // Nothing persisted -> generate and try to persist
       const key = await this.generateKek();

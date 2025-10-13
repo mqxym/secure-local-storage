@@ -42,6 +42,21 @@ export function makeSecureDataView<T extends Record<string, unknown>>(payloadIn:
       set() { throw readonlyError(); },
       defineProperty() { throw readonlyError(); },
       deleteProperty() { throw readonlyError(); },
+
+      // NEW: block prototype/extension meta-ops
+      setPrototypeOf() { throw readonlyError(); },              // Object.setPrototypeOf(...)
+      preventExtensions() { throw readonlyError(); },           // Object.preventExtensions(...)
+
+      // NEW: lock introspection after clear(), otherwise reflect
+      isExtensible(target) {                                    // Object.isExtensible(...)
+        if (cleared) throw new LockedError("Decrypted data was cleared");
+        return Reflect.isExtensible(target);
+      },
+      getPrototypeOf(target) {                                  // Object.getPrototypeOf(...)
+        if (cleared) throw new LockedError("Decrypted data was cleared");
+        return Reflect.getPrototypeOf(target);
+      },
+
       ownKeys(target) {
         if (cleared) throw new LockedError("Decrypted data was cleared");
         return Reflect.ownKeys(target);
@@ -76,6 +91,21 @@ export function makeSecureDataView<T extends Record<string, unknown>>(payloadIn:
     set() { throw readonlyError(); },
     defineProperty() { throw readonlyError(); },
     deleteProperty() { throw readonlyError(); },
+
+    // NEW: block prototype/extension meta-ops
+    setPrototypeOf() { throw readonlyError(); },
+    preventExtensions() { throw readonlyError(); },
+
+    // NEW: lock introspection after clear(), otherwise reflect
+    isExtensible(target) {
+      if (cleared) throw new LockedError("Decrypted data was cleared");
+      return Reflect.isExtensible(target);
+    },
+    getPrototypeOf(target) {
+      if (cleared) throw new LockedError("Decrypted data was cleared");
+      return Reflect.getPrototypeOf(target);
+    },
+
     ownKeys() {
       if (cleared) throw new LockedError("Decrypted data was cleared");
       return [...Object.keys(payload), "clear"];

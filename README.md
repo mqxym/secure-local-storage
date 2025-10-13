@@ -29,7 +29,7 @@ npm i @mqxym/secure-local-storage
 ```ts
 import secureLocalStorage from "@mqxym/secure-local-storage";
 
-const sls = secureLocalStorage(); // init (device mode by default)
+const sls = secureLocalStorage( {storageKey: "my-sls-storage-name"}); // init (device mode by default)
 
 await sls.setData({ value1: 123, nested: { a: "b" } });
 
@@ -61,13 +61,13 @@ await sls.importData(exported, "export-pass");        // imports and rewraps to 
 ### API
 
 ```ts
-const sls = secureLocalStorage();
+const sls = secureLocalStorage( {storageKey: "my-sls-storage-name"});
 
-console.log(sls.DATA_VERSION) // returns current data version (2)
+console.log(sls.DATA_VERSION) // returns current data version (3)
 
 // Customized usage
 const sls = secureLocalStorage({
-  storageKey: "tenant:123", // override localStorage key
+  storageKey: "tenant:123", // override localStorage key (recommended)
   idbConfig: {
     dbName: "SLS_KEYS_TENANT123", // override IndexedDB database name
     storeName: "keys",           // override object store name

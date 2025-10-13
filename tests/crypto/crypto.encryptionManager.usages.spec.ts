@@ -2,7 +2,7 @@ import "../setup";
 import { EncryptionManager } from "../../src/crypto/EncryptionManager";
 import { base64ToBytes } from "../../src/utils/base64";
 import { SLS_CONSTANTS } from "../../src/constants";
-import { CryptoError } from "../../src/errors";
+import { CryptoError, ValidationError } from "../../src/errors";
 
 describe("EncryptionManager - key usage validation & primitives", () => {
   it("wrapDek fails with a KEK that lacks wrapKey usage", async () => {
@@ -13,7 +13,7 @@ describe("EncryptionManager - key usage validation & primitives", () => {
       { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]
     );
 
-    await expect(enc.wrapDek(dek, kekWrong)).rejects.toBeInstanceOf(CryptoError);
+    await expect(enc.wrapDek(dek, kekWrong)).rejects.toBeInstanceOf(ValidationError);
   });
 
   it("generateSaltB64 yields 16 bytes and is random", () => {

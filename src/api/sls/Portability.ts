@@ -2,6 +2,8 @@
 import { SLS_CONSTANTS } from "../../constants";
 import { ImportError } from "../../errors";
 import type { PersistedConfig, PersistedConfigV3 } from "../../types";
+import { EncryptionManager } from "../../crypto/EncryptionManager";
+import { VersionManager } from "./VersionManager";
 
 export type ExportSpec = {
   dek: CryptoKey;
@@ -13,8 +15,8 @@ export type ExportSpec = {
 
 export const Portability = {
   buildExportBundle: async (
-    enc: any,
-    versionManager: any,
+    enc: EncryptionManager,
+    versionManager: VersionManager,
     spec: ExportSpec,
     plainDataObj: unknown
   ): Promise<string> => {
@@ -46,6 +48,10 @@ export const Portability = {
   },
 
   parseAndClassify: (json: string, supported: readonly (2 | 3)[]) => {
+    const MAX_BUNDLE_CHARS = 15 * 1024 * 1024; // 2 MiB
+    if (json.length > MAX_BUNDLE_CHARS) {
+    throw new ImportError("Export payload too large");
+    }
     let t: unknown;
     try { t = JSON.parse(json); } catch { throw new ImportError("Invalid export structure"); }
     if (!t || typeof t !== "object" || !(t as any).header || !(t as any).data) {

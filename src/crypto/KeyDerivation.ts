@@ -1,13 +1,7 @@
 import { SLS_CONSTANTS } from "../constants";
 import { CryptoError, ValidationError } from "../errors";
+import { asArrayBuffer } from "../utils/typedArray";
 import * as argon2 from "argon2-browser";
-
-function toArrayBuffer(u8: Uint8Array): ArrayBuffer {
-  if (u8.byteOffset === 0 && u8.byteLength === u8.buffer.byteLength && u8.buffer instanceof ArrayBuffer) {
-    return u8.buffer as ArrayBuffer;
-  }
-  return u8.slice().buffer as ArrayBuffer;
-}
 
 export async function deriveKekFromPassword(
   password: string,
@@ -22,9 +16,8 @@ export async function deriveKekFromPassword(
     throw new ValidationError(`Salt must be Uint8Array of length ${SLS_CONSTANTS.SALT_LEN}`);
   }
 
-  const MAX_ITERATIONS = 64;
-  if (!Number.isInteger(iterations) || iterations < 1 || iterations > MAX_ITERATIONS) {
-    throw new ValidationError(`iterations must be an integer in [1, ${MAX_ITERATIONS}]`);
+  if (!Number.isInteger(iterations) || iterations < 1 || iterations > SLS_CONSTANTS.ARGON2.MAX_ITERATIONS) {
+    throw new ValidationError(`iterations must be an integer in [1, ${SLS_CONSTANTS.ARGON2.MAX_ITERATIONS}]`);
   }
 
   let result: { hash: Uint8Array };
@@ -42,12 +35,16 @@ export async function deriveKekFromPassword(
     throw new CryptoError(`Argon2 derivation failed: ${(e as Error)?.message ?? e}`);
   }
 
-  if (!result?.hash) throw new CryptoError("Argon2 returned no hash");
+  if (!result?.hash || result.hash.byteLength !== SLS_CONSTANTS.ARGON2.HASH_LEN) {
+    throw new CryptoError(
+      `Argon2 returned invalid hash size (expected ${SLS_CONSTANTS.ARGON2.HASH_LEN} bytes)`
+    );
+  }
 
   try {
     return await crypto.subtle.importKey(
       "raw",
-      toArrayBuffer(result.hash),
+      asArrayBuffer(result.hash),
       { name: SLS_CONSTANTS.AES.NAME, length: SLS_CONSTANTS.AES.LENGTH },
       false,
       ["wrapKey", "unwrapKey"]

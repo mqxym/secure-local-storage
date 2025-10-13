@@ -39,7 +39,9 @@ export class StorageService {
     try {
       localStorage.setItem(this.key, serialized);
       const check = localStorage.getItem(this.key);
-      if (check !== serialized) throw new StorageFullError("Failed to persist data");
+      if (check !== serialized) {
+        throw new PersistenceError("Failed to persist data (integrity check)");
+      }
     } catch (e) {
       if (this._isQuotaExceeded(e)) {
         throw new StorageFullError(`localStorage quota exceeded (${estimateBytes(serialized)} bytes)`);

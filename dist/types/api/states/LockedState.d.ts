@@ -10,7 +10,7 @@ export declare class LockedState extends State {
     rotateKeys(): Promise<void>;
     getData<T extends Record<string, unknown>>(): Promise<any>;
     setData<T extends Record<string, unknown>>(value: T): Promise<void>;
-    exportData(customExportPassword?: string): Promise<string>;
+    exportData(_customExportPassword?: string): Promise<string>;
     importData(serialized: string, password?: string): Promise<string>;
     clear(): Promise<void>;
     initialize(forceFresh?: boolean): Promise<void>;

@@ -16,11 +16,12 @@ export const SLS_CONSTANTS = {
     ITERATIONS: 20,
     MEMORY_KIB: 64 * 1024,
     PARALLELISM: 1,
+    MAX_ITERATIONS: 64 as const,
     HASH_LEN: 32 // 256-bit
   },
 
   // Storage
-  STORAGE_KEY: "secure-local-storage:v2",
+  STORAGE_KEY: "secure-local-storage",
 
   // IndexedDB
   IDB: {

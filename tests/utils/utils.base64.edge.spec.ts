@@ -20,3 +20,10 @@ describe("base64 utils - additional edges", () => {
     expect(Array.from(back)).toEqual(Array.from(b));
   });
 });
+
+describe("base64 size guard", () => {
+  it("rejects base64 strings longer than the configured limit", () => {
+    const tooLong = "A".repeat(1024 * 1024 + 1); // > MAX_BASE64_LEN (1 MiB)
+    expect(() => base64ToBytes(tooLong)).toThrow(ValidationError);
+  });
+});

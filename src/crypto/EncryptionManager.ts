@@ -1,13 +1,7 @@
 import { SLS_CONSTANTS } from "../constants";
 import { base64ToBytes, bytesToBase64 } from "../utils/base64";
 import { CryptoError, ValidationError } from "../errors";
-
-function toArrayBuffer(u8: Uint8Array): ArrayBuffer {
-  if (u8.byteOffset === 0 && u8.byteLength === u8.buffer.byteLength && u8.buffer instanceof ArrayBuffer) {
-    return u8.buffer as ArrayBuffer;
-  }
-  return u8.slice().buffer as ArrayBuffer;
-}
+import { asArrayBuffer } from "../utils/typedArray";
 
 export class EncryptionManager {
   generateSaltB64(): string {
@@ -33,8 +27,8 @@ export class EncryptionManager {
     obj: unknown,
     aad?: Uint8Array
   ): Promise<{ iv: string; ciphertext: string }> {
+    this.assertKey(key, ["encrypt"], "encryptData()");
     try {
-      this.assertKey(key, ["encrypt"], "encryptData()");
       const iv = new Uint8Array(SLS_CONSTANTS.AES.IV_LENGTH);
       crypto.getRandomValues(iv);
       const data = new TextEncoder().encode(JSON.stringify(obj));
@@ -42,7 +36,7 @@ export class EncryptionManager {
         ? { name: SLS_CONSTANTS.AES.NAME, iv: iv as BufferSource, additionalData: aad as BufferSource}
         : { name: SLS_CONSTANTS.AES.NAME, iv: iv as BufferSource};
 
-      const ct = await crypto.subtle.encrypt(algo, key, toArrayBuffer(data));
+      const ct = await crypto.subtle.encrypt(algo, key, asArrayBuffer(data));
       return { iv: bytesToBase64(iv), ciphertext: bytesToBase64(ct) };
     } catch (e) {
       throw new CryptoError(`Encryption failed: ${(e as Error)?.message ?? e}`);
@@ -71,7 +65,7 @@ export class EncryptionManager {
       const algo: AesGcmParams = aad
         ? { name: SLS_CONSTANTS.AES.NAME, iv: ivBytes as BufferSource, additionalData: aad as BufferSource }
         : { name: SLS_CONSTANTS.AES.NAME, iv: ivBytes as BufferSource };
-      pt = await crypto.subtle.decrypt(algo, key, toArrayBuffer(ct));
+      pt = await crypto.subtle.decrypt(algo, key, asArrayBuffer(ct));
     } catch (e) {
       throw new CryptoError(`Invalid key or data.`);
     }
@@ -96,16 +90,15 @@ export class EncryptionManager {
     if (ivBytes.byteLength !== SLS_CONSTANTS.AES.IV_LENGTH) {
       throw new ValidationError(`Wrap IV must be ${SLS_CONSTANTS.AES.IV_LENGTH} bytes`);
     }
-
+    this.assertKey(kek, ["unwrapKey"], "unwrapDek()");
     try {
-      this.assertKey(kek, ["unwrapKey"], "unwrapDek()");
       const algo: AesGcmParams = aad
         ? { name: SLS_CONSTANTS.AES.NAME, iv: ivBytes as BufferSource, additionalData: aad as BufferSource }
         : { name: SLS_CONSTANTS.AES.NAME, iv: ivBytes as BufferSource };
 
       return await crypto.subtle.unwrapKey(
         "raw",
-        toArrayBuffer(wrapped),
+        asArrayBuffer(wrapped),
         kek,
         algo,
         { name: SLS_CONSTANTS.AES.NAME, length: SLS_CONSTANTS.AES.LENGTH },
@@ -122,8 +115,8 @@ export class EncryptionManager {
     kek: CryptoKey,
     aad?: Uint8Array
   ): Promise<{ ivWrap: string; wrappedKey: string }> {
+    this.assertKey(kek, ["wrapKey"], "wrapDek()");
     try {
-      this.assertKey(kek, ["wrapKey"], "wrapDek()");
       const iv = new Uint8Array(SLS_CONSTANTS.AES.IV_LENGTH);
       crypto.getRandomValues(iv);
       const algo: AesGcmParams = aad
@@ -137,13 +130,22 @@ export class EncryptionManager {
   }
 
   private assertKey(key: CryptoKey, required: KeyUsage[], where: string): void {
-    if (!key || (key.algorithm as { name?: string })?.name !== SLS_CONSTANTS.AES.NAME) {
+    const alg = key?.algorithm as Partial<AesKeyGenParams> & { name?: string } | undefined;
+
+    if (!key || alg?.name !== SLS_CONSTANTS.AES.NAME) {
       throw new ValidationError(`Invalid key algorithm for ${where}; expected ${SLS_CONSTANTS.AES.NAME}`);
     }
+
+    // Enforce key size when available from the WebCrypto implementation
+    const len = typeof alg?.length === "number" ? alg!.length : undefined;
+    if (len !== undefined && len !== SLS_CONSTANTS.AES.LENGTH) {
+      throw new ValidationError(`Invalid key length for ${where}; expected ${SLS_CONSTANTS.AES.LENGTH} bits`);
+    }
+
     for (const u of required) {
       if (!key.usages.includes(u)) {
         throw new ValidationError(`Key missing "${u}" usage for ${where}`);
       }
-    }
+  }
   } 
 }

@@ -67,9 +67,10 @@ export class LockedState extends State {
     throw new LockedError();
   }
 
-  exportData(customExportPassword?: string): Promise<string> {
-    throw new Error("Method not implemented.");
+  async exportData(_customExportPassword?: string): Promise<string> {
+    throw new LockedError();
   }
+
   importData(serialized: string, password?: string): Promise<string> {
     throw new Error("Method not implemented.");
   }

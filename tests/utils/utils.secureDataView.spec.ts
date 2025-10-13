@@ -42,3 +42,25 @@ describe("SecureDataView - descriptor details", () => {
     expect(() => Object.getOwnPropertyDescriptor(view, "a")).toThrow(LockedError);
   });
 });
+
+import { ValidationError } from "../../src/errors";
+
+describe("SecureDataView - meta operation hardening", () => {
+  it("blocks setPrototypeOf/preventExtensions on top-level and nested views", async () => {
+    const sls = secureLocalStorage({ storageKey: "test:view:meta" });
+    await sls.setData({ x: 1, nested: { y: 2 } });
+
+    const view = await sls.getData<{ x: number; nested: { y: number } }>();
+
+    expect(() => Object.setPrototypeOf(view, null)).toThrow(ValidationError);
+    expect(() => Object.preventExtensions(view)).toThrow(ValidationError);
+
+    // nested proxy is also protected
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const n: any = (view as any).nested;
+    expect(() => Object.setPrototypeOf(n, null)).toThrow(ValidationError);
+    expect(() => Object.preventExtensions(n)).toThrow(ValidationError);
+
+    view.clear();
+  });
+});
