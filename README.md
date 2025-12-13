@@ -7,7 +7,8 @@ Secure arbitrary JSON data in `localStorage` using AES‑GCM‑256 envelope encr
 
 Built for browsers with the Web Crypto API. Bundled for ESM & CJS. Engine: **Bun ≥ 1.2.22** (for builds & tests).
 
-> ⚠️ This library secures data *at rest* in `localStorage`. It cannot protect against a compromised page runtime (XSS, devtools, malicious extensions). Always follow secure coding & CSP best practices.
+> [!WARNING]
+> This library secures data *at rest* in `localStorage`. It cannot protect against a compromised page runtime (XSS, devtools, malicious extensions). Always follow secure coding & CSP best practices.
 
 ---
 
