@@ -11,6 +11,8 @@ updates:
     assignees:
       - "mqxym"
     target-branch: "mqxym/dev"
+    allow:
+      - dependency-type: "production"
 
   - package-ecosystem: "github-actions"
     directory: "/"               
