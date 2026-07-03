@@ -14,9 +14,18 @@ export class StorageService {
   }
 
   get(): PersistedConfig | null {
-    const raw = localStorage.getItem(this.key);
+    let raw: string | null = null;
+    try {
+      raw = localStorage.getItem(this.key);
+    } catch {
+      return null;
+    }
     if (!raw) return null;
-    try { return JSON.parse(raw) as PersistedConfig; } catch { return null; }
+    try {
+      return JSON.parse(raw) as PersistedConfig;
+    } catch {
+      return null;
+    }
   }
 
   _isQuotaExceeded(err: unknown): boolean {
@@ -44,10 +53,10 @@ export class StorageService {
       }
     } catch (e) {
       if (this._isQuotaExceeded(e)) {
-        throw new StorageFullError(`localStorage quota exceeded (${estimateBytes(serialized)} bytes)`);
+        throw new StorageFullError(`localStorage quota exceeded (${estimateBytes(serialized)} bytes)`, { cause: e });
       }
       const msg = (e as Error)?.message ?? String(e);
-      throw new PersistenceError(`Failed to persist data: ${msg}`);
+      throw new PersistenceError(`Failed to persist data: ${msg}`, { cause: e });
     }
   }
 

@@ -20,6 +20,20 @@ describe("KeyDerivation", () => {
     await expect(deriveKekFromPassword("pw", new Uint8Array(16))).rejects.toBeInstanceOf(CryptoError);
     spy.mockRestore();
   });
+
+  it("attaches the underlying argon2 error via CryptoError.cause", async () => {
+    const underlying = new Error("argon2 boom");
+    const spy = jest.spyOn(argon2, "hash").mockRejectedValueOnce(underlying);
+    let caught: unknown;
+    try {
+      await deriveKekFromPassword("pw", new Uint8Array(16));
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(CryptoError);
+    expect((caught as CryptoError).cause).toBe(underlying);
+    spy.mockRestore();
+  });
 });
 
 describe("KeyDerivation - extra input validation", () => {

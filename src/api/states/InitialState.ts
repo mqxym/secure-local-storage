@@ -1,7 +1,7 @@
 import { State } from "./BaseState";
 import { DeviceModeState } from "./DeviceModeState";
 import { LockedState } from "./LockedState";
-import type { PersistedConfigV3 } from "../../types";
+import type { PersistedConfigV3, PersistedConfig } from "../../types";
 import { SLS_CONSTANTS } from "../../constants";
 
 export class InitialState extends State {
@@ -66,8 +66,18 @@ export class InitialState extends State {
     this.transitionTo(new DeviceModeState(this.context));
   }
 
-  isUsingMasterPassword(): boolean { throw new Error("Not initialized"); }
-  isLocked(): boolean { throw new Error("Not initialized"); }
+  isUsingMasterPassword(): boolean {
+    const existing = this.context.store.get() as unknown;
+    if (!this.context.versionManager.isValidConfig(existing)) return false;
+    const cfg = existing as PersistedConfig;
+    return cfg.header.rounds > 1;
+  }
+
+  isLocked(): boolean {
+    // before we have a session KEK, master-mode implies locked
+    return this.isUsingMasterPassword();
+  }
+
   unlock(masterPassword: string): Promise<void> { throw new Error("Not initialized"); }
   setMasterPassword(masterPassword: string): Promise<void> { throw new Error("Not initialized"); }
   removeMasterPassword(): Promise<void> { throw new Error("Not initialized"); }

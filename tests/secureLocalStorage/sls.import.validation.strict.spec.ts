@@ -47,3 +47,57 @@ describe("importData strict validation & messaging", () => {
     await expect(sls2.importData(exported)).rejects.toBeInstanceOf(ImportError);
   });
 });
+
+describe("importData strict validation - partial data should be rejected", () => {
+  it("rejects iv present but ciphertext empty (both-or-none)", async () => {
+    const sls = secureLocalStorage({ storageKey: "test:import:strict:partial-iv-only" });
+
+    const bad = JSON.stringify({
+      header: { v: 2, salt: "", rounds: 1, iv: "YWJj", wrappedKey: "YWJj" },
+      data: { iv: "YWJj", ciphertext: "" } // <- should be rejected
+    });
+
+    await expect(sls.importData(bad, "x")).rejects.toBeInstanceOf(ImportError);
+  });
+
+  it("rejects ciphertext present but iv empty (both-or-none)", async () => {
+    const sls = secureLocalStorage({ storageKey: "test:import:strict:partial-ct-only" });
+
+    const bad = JSON.stringify({
+      header: { v: 2, salt: "", rounds: 1, iv: "YWJj", wrappedKey: "YWJj" },
+      data: { iv: "", ciphertext: "YWJj" } // <- should be rejected
+    });
+
+    await expect(sls.importData(bad, "x")).rejects.toBeInstanceOf(ImportError);
+  });
+});
+
+import { SLS_CONSTANTS } from "../../src/constants";
+
+describe("importData strict validation - salt must be valid base64 and correct length in master bundles", () => {
+  it("rejects invalid base64 salt when rounds > 1", async () => {
+    const sls = secureLocalStorage({ storageKey: "test:import:strict:bad-salt-b64" });
+
+    const bad = JSON.stringify({
+      header: { v: 2, salt: "!!!", rounds: 5, iv: "YWJj", wrappedKey: "YWJj" },
+      data: { iv: "", ciphertext: "" }
+    });
+
+    await expect(sls.importData(bad, "pw")).rejects.toBeInstanceOf(ImportError);
+  });
+
+  it("rejects wrong salt length when rounds > 1", async () => {
+    const sls = secureLocalStorage({ storageKey: "test:import:strict:bad-salt-len" });
+
+    // base64("abc") => 3 bytes, but SALT_LEN is 16
+    const shortSalt = "YWJj";
+
+    const bad = JSON.stringify({
+      header: { v: 2, salt: shortSalt, rounds: 5, iv: "YWJj", wrappedKey: "YWJj" },
+      data: { iv: "", ciphertext: "" }
+    });
+
+    await expect(sls.importData(bad, "pw")).rejects.toBeInstanceOf(ImportError);
+    expect(SLS_CONSTANTS.SALT_LEN).toBe(16); // sanity: ties to project constant
+  });
+});

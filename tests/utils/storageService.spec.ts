@@ -179,3 +179,50 @@ describe("StorageService - integrity & quota variants", () => {
     }
   });
 });
+
+describe("StorageService - error cause chaining", () => {
+  const cfg = {
+    header: { v: 2, salt: "", rounds: 1, iv: "iv", wrappedKey: "wk" },
+    data: { iv: "iv", ciphertext: "ct" }
+  } as unknown as any;
+
+  it("StorageFullError exposes the underlying quota error as cause", () => {
+    const key = "test:storage:cause:quota";
+    const svc = new StorageService(key);
+    const original = localStorage.setItem;
+    const underlying = new Error("quota exceeded");
+    // @ts-ignore
+    localStorage.setItem = () => { throw underlying; };
+
+    try {
+      let caught: unknown;
+      try { svc.set(cfg); } catch (e) { caught = e; }
+      expect(caught).toBeInstanceOf(StorageFullError);
+      expect((caught as StorageFullError).cause).toBe(underlying);
+    } finally {
+      // @ts-ignore
+      localStorage.setItem = original;
+      localStorage.removeItem(key);
+    }
+  });
+
+  it("PersistenceError exposes the underlying non-quota write error as cause", () => {
+    const key = "test:storage:cause:persist";
+    const svc = new StorageService(key);
+    const original = localStorage.setItem;
+    const underlying = new Error("security exception");
+    // @ts-ignore
+    localStorage.setItem = () => { throw underlying; };
+
+    try {
+      let caught: unknown;
+      try { svc.set(cfg); } catch (e) { caught = e; }
+      expect(caught).toBeInstanceOf(PersistenceError);
+      expect((caught as PersistenceError).cause).toBe(underlying);
+    } finally {
+      // @ts-ignore
+      localStorage.setItem = original;
+      localStorage.removeItem(key);
+    }
+  });
+});

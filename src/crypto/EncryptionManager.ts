@@ -18,7 +18,7 @@ export class EncryptionManager {
         ["encrypt", "decrypt", "wrapKey", "unwrapKey"]
       );
     } catch (e) {
-      throw new CryptoError(`Failed to generate DEK: ${(e as Error)?.message ?? e}`);
+      throw new CryptoError(`Failed to generate DEK: ${(e as Error)?.message ?? e}`, { cause: e });
     }
   }
 
@@ -39,7 +39,7 @@ export class EncryptionManager {
       const ct = await crypto.subtle.encrypt(algo, key, asArrayBuffer(data));
       return { iv: bytesToBase64(iv), ciphertext: bytesToBase64(ct) };
     } catch (e) {
-      throw new CryptoError(`Encryption failed: ${(e as Error)?.message ?? e}`);
+      throw new CryptoError(`Encryption failed: ${(e as Error)?.message ?? e}`, { cause: e });
     }
   }
 
@@ -67,7 +67,7 @@ export class EncryptionManager {
         : { name: SLS_CONSTANTS.AES.NAME, iv: ivBytes as BufferSource };
       pt = await crypto.subtle.decrypt(algo, key, asArrayBuffer(ct));
     } catch (e) {
-      throw new CryptoError(`Invalid key or data.`);
+      throw new CryptoError(`Invalid key or data.`, { cause: e });
     }
 
     try {
@@ -105,8 +105,8 @@ export class EncryptionManager {
         forWrapping,
         forWrapping ? ["wrapKey", "unwrapKey", "encrypt", "decrypt"] : ["encrypt", "decrypt"]
       );
-    } catch {
-      throw new CryptoError("Invalid key or data.");
+    } catch (e) {
+      throw new CryptoError("Invalid key or data.", { cause: e });
     }
   }
 
@@ -125,7 +125,7 @@ export class EncryptionManager {
       const wrapped = await crypto.subtle.wrapKey("raw", dek, kek, algo);
       return { ivWrap: bytesToBase64(iv), wrappedKey: bytesToBase64(wrapped) };
     } catch (e) {
-      throw new CryptoError(`wrapKey failed: ${(e as Error)?.message ?? e}`);
+      throw new CryptoError(`wrapKey failed: ${(e as Error)?.message ?? e}`, { cause: e });
     }
   }
 

@@ -149,6 +149,18 @@ export class SecureLocalStorage {
   private ready: Promise<void>;
 
   /**
+   * @internal
+   * Tail of the operation queue used to serialize mutating/reading operations.
+   *
+   * @remarks
+   * Public async methods run through {@link runExclusive} so that operations
+   * touching shared mutable state (`config`, `dek`, persisted bundle) never
+   * interleave. This prevents lost updates and inconsistent reads when callers
+   * issue concurrent `setData`/`getData`/import/rotate calls on the same instance.
+   */
+  private opChain: Promise<unknown> = Promise.resolve();
+
+  /**
    * Resolved IndexedDB namespace used for device KEK persistence.
    * @remarks
    * Propagated to {@link DeviceKeyProvider} calls, including surgical deletes and rotations.
@@ -210,6 +222,29 @@ export class SecureLocalStorage {
   }
 
   /**
+   * @internal
+   * Run an operation exclusively, serialized after any in-flight operation on
+   * this instance.
+   *
+   * @typeParam T - The operation's resolved value type.
+   * @param op - The operation to run once the queue drains.
+   * @returns The operation's result.
+   *
+   * @remarks
+   * A rejected operation does not break the chain: subsequent operations still
+   * run. The caller receives the original rejection.
+   */
+  private runExclusive<T>(op: () => Promise<T>): Promise<T> {
+    const run = this.opChain.then(op, op);
+    // Keep the chain alive regardless of this operation's outcome.
+    this.opChain = run.then(
+      () => undefined,
+      () => undefined
+    );
+    return run;
+  }
+
+  /**
    * Returns `true` if the store is protected by a master password.
    *
    * @returns Whether master-password mode is active.
@@ -248,7 +283,7 @@ export class SecureLocalStorage {
    */
   public async unlock(masterPassword: string): Promise<void> {
     await this.ready;
-    return this.state.unlock(masterPassword);
+    return this.runExclusive(() => this.state.unlock(masterPassword));
   }
 
   /**
@@ -263,7 +298,7 @@ export class SecureLocalStorage {
    */
   public async setMasterPassword(masterPassword: string): Promise<void> {
     await this.ready;
-    return this.state.setMasterPassword(masterPassword);
+    return this.runExclusive(() => this.state.setMasterPassword(masterPassword));
   }
 
   /**
@@ -277,7 +312,7 @@ export class SecureLocalStorage {
    */
   public async removeMasterPassword(): Promise<void> {
     await this.ready;
-    return this.state.removeMasterPassword();
+    return this.runExclusive(() => this.state.removeMasterPassword());
   }
 
   /**
@@ -292,7 +327,7 @@ export class SecureLocalStorage {
    */
   public async rotateMasterPassword(oldMasterPassword: string, newMasterPassword: string): Promise<void> {
     await this.ready;
-    return this.state.rotateMasterPassword(oldMasterPassword, newMasterPassword);
+    return this.runExclusive(() => this.state.rotateMasterPassword(oldMasterPassword, newMasterPassword));
   }
 
   /**
@@ -318,7 +353,7 @@ export class SecureLocalStorage {
    */
   public async rotateKeys(): Promise<void> {
     await this.ready;
-    return this.state.rotateKeys();
+    return this.runExclusive(() => this.state.rotateKeys());
   }
 
   /**
@@ -336,7 +371,7 @@ export class SecureLocalStorage {
    */
   public async getData<T extends Record<string, unknown> = Record<string, unknown>>(): Promise<SecureDataView<T>> {
     await this.ready;
-    return this.state.getData();
+    return this.runExclusive(() => this.state.getData<T>());
   }
 
   /**
@@ -351,7 +386,7 @@ export class SecureLocalStorage {
    */
   public async setData<T extends Record<string, unknown>>(value: T): Promise<void> {
     await this.ready;
-    return this.state.setData(value);
+    return this.runExclusive(() => this.state.setData(value));
   }
 
   /**
@@ -370,7 +405,7 @@ export class SecureLocalStorage {
    */
   public async exportData(customExportPassword?: string): Promise<string> {
     await this.ready;
-    return this.state.exportData(customExportPassword);
+    return this.runExclusive(() => this.state.exportData(customExportPassword));
   }
 
   /**
@@ -390,7 +425,15 @@ export class SecureLocalStorage {
    */
   public async importData(serialized: string, password?: string): Promise<string> {
     await this.ready;
- 
+    return this.runExclusive(() => this.importDataInternal(serialized, password));
+  }
+
+  /**
+   * @internal
+   * Serialized body of {@link importData}. Assumes the instance is initialized
+   * and is already running inside the operation queue.
+   */
+  private async importDataInternal(serialized: string, password?: string): Promise<string> {
     const { bundle, isMasterProtected } = Portability.parseAndClassify(serialized, SLS_CONSTANTS.SUPPORTED_VERSIONS);   
 
     this.validateBundle(bundle);
@@ -415,8 +458,8 @@ export class SecureLocalStorage {
           const dataAad = dataAadBuilder(bundle.header.iv, bundle.header.wrappedKey);
           await this.enc.decryptData<Record<string, unknown>>(dek, bundle.data.iv, bundle.data.ciphertext, dataAad);
         }
-      } catch {
-        throw new ImportError("Invalid master password or corrupted export data");
+      } catch (e) {
+        throw new ImportError("Invalid master password or corrupted export data", { cause: e });
       }
       if (!this.versionManager.isV3(bundle) || (this.versionManager.isV3(bundle) && bundle.header.ctx !== "store")) {
         const kek = await deriveKekFromPassword(password, base64ToBytes(bundle.header.salt), (bundle.header as any).rounds);
@@ -485,8 +528,8 @@ export class SecureLocalStorage {
       this.persist();
       this.transitionTo(new DeviceModeState(this));
       return "customExportPassword";
-    } catch {
-      throw new ImportError("Invalid export password or corrupted export data");
+    } catch (e) {
+      throw new ImportError("Invalid export password or corrupted export data", { cause: e });
     }
   }
 
@@ -501,7 +544,7 @@ export class SecureLocalStorage {
    */
   public async clear(): Promise<void> {
     await this.ready;
-    return this.state.clear();
+    return this.runExclusive(() => this.state.clear());
   }
 
   /** @internal Persist current config to localStorage (with integrity check and error wrapping). */
@@ -555,25 +598,55 @@ export class SecureLocalStorage {
    * @internal Validate a parsed bundle semantically (rounds/salt rules, both-or-none data, base64 fields).
    * Throws {@link ImportError} with a precise reason on failure.
    */
+
   public validateBundle(bundle: PersistedConfig): void {
-    const h = bundle?.header as any;
-    const d = bundle?.data as any;
+    const h = bundle?.header as unknown as {
+      v?: unknown;
+      salt?: unknown;
+      rounds?: unknown;
+      iv?: unknown;
+      wrappedKey?: unknown;
+      mPw?: unknown;
+      ctx?: unknown;
+    };
+    const d = bundle?.data as unknown as { iv?: unknown; ciphertext?: unknown };
+
     if (!h || !d) throw new ImportError("Invalid export structure");
 
-    if (!Number.isInteger(h.rounds) || h.rounds < 1) throw new ImportError("Invalid header.rounds");
+    const roundsUnknown = h.rounds;
 
-    if (h.rounds === 1) {
+    if (typeof roundsUnknown !== "number" || !Number.isInteger(roundsUnknown)) {
+      throw new ImportError("Invalid header.rounds");
+    }
+
+    const rounds = roundsUnknown; // now `rounds: number`
+
+    if (rounds < 1 || rounds > SLS_CONSTANTS.ARGON2.MAX_ITERATIONS) {
+      throw new ImportError("Invalid header.rounds");
+    }
+
+    // salt semantics + validation
+    if (rounds === 1) {
       if (h.salt !== "") throw new ImportError("Device-mode bundles must have empty salt");
     } else {
       if (typeof h.salt !== "string" || h.salt.length === 0) {
         throw new ImportError("Password-protected bundles must include non-empty salt");
       }
+      let saltBytes: Uint8Array;
+      try {
+        saltBytes = base64ToBytes(h.salt);
+      } catch {
+        throw new ImportError("Invalid header.salt");
+      }
+      if (saltBytes.byteLength !== SLS_CONSTANTS.SALT_LEN) {
+        throw new ImportError("Invalid header.salt");
+      }
     }
 
-    if ("mPw" in h && typeof h.mPw !== "boolean") {
+    if ("mPw" in h && h.mPw !== undefined && typeof h.mPw !== "boolean") {
       throw new ImportError("Invalid header.mPw");
     }
-    if ("ctx" in h && !(h.ctx === "store" || h.ctx === "export")) {
+    if ("ctx" in h && h.ctx !== undefined && !(h.ctx === "store" || h.ctx === "export")) {
       throw new ImportError("Invalid header.ctx");
     }
 
@@ -583,12 +656,26 @@ export class SecureLocalStorage {
       throw new ImportError("Invalid data section");
     }
 
+    // both-or-none data fields (prevents silent truncation acceptance)
+    const hasIv = d.iv.length > 0;
+    const hasCt = d.ciphertext.length > 0;
+    if (hasIv !== hasCt) {
+      throw new ImportError("Invalid data section");
+    }
+
     try {
-      base64ToBytes(h.iv);
+      const wrapIv = base64ToBytes(h.iv);
+      if (wrapIv.byteLength !== SLS_CONSTANTS.AES.IV_LENGTH) throw new ImportError("Invalid header.iv");
+
       base64ToBytes(h.wrappedKey);
-      if (d.iv) base64ToBytes(d.iv);
-      if (d.ciphertext) base64ToBytes(d.ciphertext);
-    } catch {
+
+      if (hasIv) {
+        const dataIv = base64ToBytes(d.iv);
+        if (dataIv.byteLength !== SLS_CONSTANTS.AES.IV_LENGTH) throw new ImportError("Invalid data.iv");
+        base64ToBytes(d.ciphertext);
+      }
+    } catch (e) {
+      if (e instanceof ImportError) throw e;
       throw new ImportError("Invalid base64 data");
     }
   }

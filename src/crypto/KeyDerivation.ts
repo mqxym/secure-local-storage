@@ -32,7 +32,7 @@ export async function deriveKekFromPassword(
       type: argon2.ArgonType.Argon2id
     });
   } catch (e) {
-    throw new CryptoError(`Argon2 derivation failed: ${(e as Error)?.message ?? e}`);
+    throw new CryptoError(`Argon2 derivation failed: ${(e as Error)?.message ?? e}`, { cause: e });
   }
 
   if (!result?.hash || result.hash.byteLength !== SLS_CONSTANTS.ARGON2.HASH_LEN) {
@@ -50,6 +50,6 @@ export async function deriveKekFromPassword(
       ["wrapKey", "unwrapKey"]
     );
   } catch (e) {
-    throw new CryptoError(`Failed to import derived key: ${(e as Error)?.message ?? e}`);
+    throw new CryptoError(`Failed to import derived key: ${(e as Error)?.message ?? e}`, { cause: e });
   }
 }

@@ -6,3 +6,4 @@ build/
 scan*.md
 local-compiled/
 old_concept/
+**/scan/*
