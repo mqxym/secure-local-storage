@@ -53,7 +53,7 @@ export const Portability = {
     throw new ImportError("Export payload too large");
     }
     let t: unknown;
-    try { t = JSON.parse(json); } catch { throw new ImportError("Invalid export structure"); }
+    try { t = JSON.parse(json); } catch (e) { throw new ImportError("Invalid export structure", { cause: e }); }
     if (!t || typeof t !== "object" || !(t as any).header || !(t as any).data) {
       throw new ImportError("Invalid export structure");
     }

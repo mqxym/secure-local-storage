@@ -155,29 +155,31 @@ export class DeviceModeState extends State {
     if (!customExportPassword || !customExportPassword.trim()) {
       throw new ExportError("Export password required in device mode");
     }
-    
+
     this.context.requireConfig();
     await this.context.ensureDekLoaded();
 
     const plain = await this.context.decryptCurrentData();
-
-    // Make DEK extractable for wrapping
     const deviceKek = await this.context.deviceKeyProvider.getKey(this.context.idbConfig);
-    await this.context.unwrapDekWithKek(
-      deviceKek,
-      true,
-      this.context.versionManager.getAadFor("wrap", this.context.config)
-    );
-    const saltB64 = this.context.enc.generateSaltB64();
-    const rounds = SLS_CONSTANTS.ARGON2.ITERATIONS;
-    const kek = await this.context.deriveKekFromPassword(
-      customExportPassword,
-      base64ToBytes(saltB64),
-      rounds
-    );
+    const wrapAadStore = this.context.versionManager.getAadFor("wrap", this.context.config);
 
-    const spec: ExportSpec = { dek: this.context.dek!, kek, saltB64, rounds, mPw: false };
-    return Portability.buildExportBundle(this.context.enc, this.context.versionManager, spec, plain);
+    // make extractable only for the shortest possible window
+    await this.context.unwrapDekWithKek(deviceKek, true, wrapAadStore);
+
+    try {
+      const saltB64 = this.context.enc.generateSaltB64();
+      const rounds = SLS_CONSTANTS.ARGON2.ITERATIONS;
+      const kek = await this.context.deriveKekFromPassword(customExportPassword, base64ToBytes(saltB64), rounds);
+      const spec: ExportSpec = { dek: this.context.dek!, kek, saltB64, rounds, mPw: false };
+      return await Portability.buildExportBundle(this.context.enc, this.context.versionManager, spec, plain);
+    } finally {
+      // best-effort restore to non-extractable DEK for the session
+      try {
+        await this.context.unwrapDekWithKek(deviceKek, false, wrapAadStore);
+      } catch {
+        /* ignore: a subsequent call will re-load if needed */
+      }
+    }
   }
 
   importData(serialized: string, password?: string): Promise<string> {

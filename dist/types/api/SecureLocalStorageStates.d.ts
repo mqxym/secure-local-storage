@@ -128,6 +128,17 @@ export declare class SecureLocalStorage {
     /** @internal Resolves after InitialState.initialize(). All public async methods await this barrier. */
     private ready;
     /**
+     * @internal
+     * Tail of the operation queue used to serialize mutating/reading operations.
+     *
+     * @remarks
+     * Public async methods run through {@link runExclusive} so that operations
+     * touching shared mutable state (`config`, `dek`, persisted bundle) never
+     * interleave. This prevents lost updates and inconsistent reads when callers
+     * issue concurrent `setData`/`getData`/import/rotate calls on the same instance.
+     */
+    private opChain;
+    /**
      * Resolved IndexedDB namespace used for device KEK persistence.
      * @remarks
      * Propagated to {@link DeviceKeyProvider} calls, including surgical deletes and rotations.
@@ -170,6 +181,20 @@ export declare class SecureLocalStorage {
     constructor(opts?: SecureLocalStorageOptions);
     /** @internal State transition helper (do not call directly). */
     transitionTo(state: State): void;
+    /**
+     * @internal
+     * Run an operation exclusively, serialized after any in-flight operation on
+     * this instance.
+     *
+     * @typeParam T - The operation's resolved value type.
+     * @param op - The operation to run once the queue drains.
+     * @returns The operation's result.
+     *
+     * @remarks
+     * A rejected operation does not break the chain: subsequent operations still
+     * run. The caller receives the original rejection.
+     */
+    private runExclusive;
     /**
      * Returns `true` if the store is protected by a master password.
      *
@@ -309,6 +334,12 @@ export declare class SecureLocalStorage {
      * - v2 bundles are migrated to v3 automatically with AAD binding.
      */
     importData(serialized: string, password?: string): Promise<string>;
+    /**
+     * @internal
+     * Serialized body of {@link importData}. Assumes the instance is initialized
+     * and is already running inside the operation queue.
+     */
+    private importDataInternal;
     /**
      * Clear all local state and persisted content for this instance.
      *

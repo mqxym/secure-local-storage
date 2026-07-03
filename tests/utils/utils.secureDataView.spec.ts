@@ -64,3 +64,48 @@ describe("SecureDataView - meta operation hardening", () => {
     view.clear();
   });
 });
+
+describe("SecureDataView - nested proxy identity & access", () => {
+  it("returns a stable proxy instance for the same nested object", async () => {
+    const sls = secureLocalStorage({ storageKey: "test:view:identity" });
+    await sls.setData({ nested: { a: 1 } });
+
+    const view = await sls.getData<{ nested: { a: number } }>();
+    const first = view.nested;
+    const second = view.nested;
+    expect(first).toBe(second);
+    view.clear();
+  });
+
+  it("returns undefined for unknown symbol property access (before clear)", async () => {
+    const sls = secureLocalStorage({ storageKey: "test:view:symbol" });
+    await sls.setData({ a: 1 });
+
+    const view = await sls.getData<{ a: number }>();
+    const sym = Symbol("missing");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((view as any)[sym]).toBeUndefined();
+    view.clear();
+  });
+
+  it("nested reads throw LockedError after clear()", async () => {
+    const sls = secureLocalStorage({ storageKey: "test:view:nested:clear" });
+    await sls.setData({ nested: { a: 1 } });
+
+    const view = await sls.getData<{ nested: { a: number } }>();
+    const nested = view.nested;
+    view.clear();
+    expect(() => nested.a).toThrow(LockedError);
+  });
+
+  it("'has' trap reports clear as present and reflects own keys before clear", async () => {
+    const sls = secureLocalStorage({ storageKey: "test:view:has" });
+    await sls.setData({ a: 1 });
+
+    const view = await sls.getData<{ a: number }>();
+    expect("clear" in view).toBe(true);
+    expect("a" in view).toBe(true);
+    expect("missing" in view).toBe(false);
+    view.clear();
+  });
+});

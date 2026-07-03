@@ -19,7 +19,8 @@ function resolveIdbConfig(cfg?: Partial<IdbConfig>): IdbConfig {
 
 /** Build a stable in-memory identity per (dbName, storeName, keyId). */
 function memKeyId(cfg: IdbConfig): string {
-  return `${cfg.dbName}::${cfg.storeName}::${cfg.keyId}`;
+  // Collision-free for arbitrary strings.
+  return JSON.stringify([cfg.dbName, cfg.storeName, cfg.keyId]);
 }
 
 function isValidKek(candidate: unknown): candidate is CryptoKey {
@@ -47,13 +48,36 @@ export class DeviceKeyProvider {
   // Keep one in-memory key per (dbName, storeName, keyId)
   private static memoryKeys = new Map<string, CryptoKey>();
 
+  // NEW: single-flight per memKeyId to avoid concurrent double-generation
+  private static inflight = new Map<string, Promise<CryptoKey>>();
+
   static async getKey(cfgIn?: Partial<IdbConfig>): Promise<CryptoKey> {
     const cfg = resolveIdbConfig(cfgIn);
     const mk = memKeyId(cfg);
 
-    // Prefer in-memory identity within the current session.
-    const existingMem = this.memoryKeys.get(mk);
-    if (existingMem) return existingMem;
+    // Fast path: already cached in memory
+    const cached = this.memoryKeys.get(mk);
+    if (cached) return cached;
+
+    // Single-flight: if someone else is already fetching/generating, await it
+    const pending = this.inflight.get(mk);
+    if (pending) return pending;
+
+    const work = this.getKeyInternal(cfg, mk);
+    this.inflight.set(mk, work);
+
+    try {
+      return await work;
+    } finally {
+      // Ensure we don't leak the promise if it rejects/throws
+      this.inflight.delete(mk);
+    }
+  }
+
+  private static async getKeyInternal(cfg: IdbConfig, mk: string): Promise<CryptoKey> {
+    // Re-check memory in case something populated it between getKey() and now.
+    const cached = this.memoryKeys.get(mk);
+    if (cached) return cached;
 
     // If IndexedDB not available, use memory fallback
     if (!globalThis.indexedDB) {
@@ -63,6 +87,7 @@ export class DeviceKeyProvider {
     }
 
     const db = await this.openDB(cfg).catch(() => null);
+
     try {
       if (!db) {
         const k = await this.generateKek();
@@ -70,10 +95,11 @@ export class DeviceKeyProvider {
         return k;
       }
 
-      const existing: CryptoKey | undefined = await new Promise((resolve, reject) => {
+      // Attempt to load persisted record
+      const existing: unknown = await new Promise<unknown>((resolve, reject) => {
         const tx = db.transaction(cfg.storeName, "readonly");
         const req = tx.objectStore(cfg.storeName).get(cfg.keyId);
-        req.onsuccess = () => resolve((req.result?.key as CryptoKey) || undefined);
+        req.onsuccess = () => resolve(req.result?.key);
         req.onerror = () => reject(req.error);
       });
 
@@ -82,14 +108,17 @@ export class DeviceKeyProvider {
         return existing;
       }
 
+      // If the record exists but is malformed, try to delete it (best effort)
       await new Promise<void>((resolve, reject) => {
         const tx = db.transaction(cfg.storeName, "readwrite");
         const del = tx.objectStore(cfg.storeName).delete(cfg.keyId);
         del.onsuccess = () => resolve();
         del.onerror = () => reject(del.error);
-      }).catch(() => { /* non-fatal */ });
+      }).catch(() => {
+        /* non-fatal */
+      });
 
-      // Nothing persisted -> generate and try to persist
+      // Nothing usable persisted -> generate a new KEK and try to persist it
       const key = await this.generateKek();
 
       await new Promise<void>((resolve, reject) => {
@@ -98,10 +127,10 @@ export class DeviceKeyProvider {
         put.onsuccess = () => resolve();
         put.onerror = () => reject(put.error);
       }).catch(() => {
-        // Storing CryptoKey failed (e.g., structured clone not supported) -> ignore and fall back to memory
+        // Storing CryptoKey may fail (structured clone not supported) -> ignore and fall back to memory
       });
 
-      // Prefer in-memory identity within the session
+      // Always provide stable identity within the session
       this.memoryKeys.set(mk, key);
       return key;
     } catch {

@@ -13,7 +13,9 @@ export interface IdbConfig {
  */
 export declare class DeviceKeyProvider {
     private static memoryKeys;
+    private static inflight;
     static getKey(cfgIn?: Partial<IdbConfig>): Promise<CryptoKey>;
+    private static getKeyInternal;
     static rotateKey(cfgIn?: Partial<IdbConfig>): Promise<CryptoKey>;
     /**
      * Remove persisted key material for this configuration and clear the in-memory copy.
